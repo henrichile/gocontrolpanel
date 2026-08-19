@@ -1,0 +1,134 @@
+name: gocontrolpanel
+
+services:
+  # --- Caddy de borde: TLS y reverse proxy hacia los sitios ----------------
+  edge:
+    image: caddy:2-alpine
+    container_name: gocp-edge
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"        # HTTP/3
+    environment:
+      GOCP_CADDY_EMAIL: ${GOCP_CADDY_EMAIL:-}
+    volumes:
+      - ./deploy/edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificados: NO borrar, se perderían las emisiones
+      - caddy_config:/config
+    networks:
+      - sites
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # --- Panel de control -----------------------------------------------------
+  panel:
+    build:
+      context: .
+      args:
+        VERSION: ${GOCP_VERSION:-dev}
+    container_name: gocp-panel
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      edge:
+        condition: service_started
+    environment:
+      GOCP_ENV: production
+      GOCP_LISTEN_ADDR: ":8080"
+      GOCP_PUBLIC_URL: ${GOCP_PUBLIC_URL:?define la URL pública del panel}
+      GOCP_DATABASE_URL: postgres://gocp:${POSTGRES_PASSWORD:?}@postgres:5432/gocp?sslmode=disable
+      GOCP_JWT_SECRET: ${GOCP_JWT_SECRET:?genera uno con: openssl rand -hex 32}
+      GOCP_CADDY_ADMIN_URL: http://edge:2019
+      GOCP_CADDY_EMAIL: ${GOCP_CADDY_EMAIL:-}
+      GOCP_DOCKER_HOST: unix:///var/run/docker.sock
+      GOCP_DOCKER_NETWORK: gocontrolpanel_sites
+      GOCP_SITE_IMAGE_PREFIX: gocp/frankenphp
+      GOCP_SITES_ROOT: /srv/gocp/accounts
+      GOCP_MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:?}@tcp(mysql:3306)/
+      GOCP_MYSQL_HOST: mysql
+      GOCP_ADMIN_USER: ${GOCP_ADMIN_USER:-admin}
+      GOCP_ADMIN_EMAIL: ${GOCP_ADMIN_EMAIL:-admin@localhost}
+      GOCP_ADMIN_PASSWORD: ${GOCP_ADMIN_PASSWORD:-}
+    volumes:
+      # El panel crea y controla los contenedores de los sitios. Montar el
+      # socket equivale a dar acceso root al host: mantén el panel accesible
+      # solo a administradores y detrás de HTTPS.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Misma ruta dentro y fuera del contenedor, para que los bind mounts que
+      # el panel pide a Docker apunten a directorios reales del host.
+      - /srv/gocp/accounts:/srv/gocp/accounts
+    networks:
+      - sites
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/gocpd", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # --- PostgreSQL: estado del panel ----------------------------------------
+  postgres:
+    image: postgres:17-alpine
+    container_name: gocp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gocp
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: gocp
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - sites
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gocp -d gocp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- MariaDB: bases de datos de los clientes ------------------------------
+  mysql:
+    image: mariadb:11
+    container_name: gocp-mysql
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=300
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - sites
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # --- phpMyAdmin (opcional) ------------------------------------------------
+  phpmyadmin:
+    image: phpmyadmin:5
+    container_name: gocp-phpmyadmin
+    restart: unless-stopped
+    profiles: ["extras"]
+    environment:
+      PMA_HOST: mysql
+      UPLOAD_LIMIT: 256M
+    networks:
+      - sites
+
+networks:
+  sites:
+    name: gocontrolpanel_sites
+    driver: bridge
+
+volumes:
+  pg_data:
+  mysql_data:
+  caddy_data:
+  caddy_config:

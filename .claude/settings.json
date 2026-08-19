@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(printf 'y' > \"/z/home/tmp-zonetest/sub/a.txt:Zone.Identifier\" && ./scripts/clean-zone-identifier.sh /z/home/tmp-zonetest && ls /z/home/tmp-zonetest/sub && rm -rf /z/home/tmp-zonetest)"
+    ],
+    "additionalDirectories": [
+      "Z:\\home\\tmp-zonetest\\sub"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+bin/
+.env
+*.log
+
+# El build de la SPA se genera con `make web`; solo se versiona el placeholder.
+web/node_modules/
+web/dist/assets/
+web/.vite/
+
+# Metadatos que Windows deja al copiar ficheros descargados (`make clean-zone`).
+*:Zone.Identifier
+
+.DS_Store
+.idea/
+.vscode/

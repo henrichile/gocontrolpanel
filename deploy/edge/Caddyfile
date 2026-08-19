@@ -1,0 +1,32 @@
+# Configuración de arranque del Caddy de borde.
+#
+# A partir del primer `SyncCaddy`, el panel sustituye esta configuración por la
+# generada dinámicamente a través de la Admin API (/load). Este archivo solo
+# define el estado mínimo para que Caddy arranque y quede a la escucha de la
+# API de administración.
+
+{
+	# La API de administración escucha en la red interna de Docker; NO debe
+	# publicarse hacia Internet.
+	admin 0.0.0.0:2019
+
+	# Correo para Let's Encrypt. El panel lo reescribe con GOCP_CADDY_EMAIL.
+	email {$GOCP_CADDY_EMAIL}
+
+	# El panel autoriza cada dominio antes de emitir su certificado, de modo
+	# que nadie pueda apuntar un DNS ajeno a este servidor y consumir la cuota
+	# de ACME.
+	on_demand_tls {
+		ask http://gocp-panel:8080/api/v1/tls/authorize
+	}
+
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+# Vhost por defecto: cualquier dominio todavía sin publicar recibe un 404
+# claro en lugar de una respuesta confusa.
+:80 {
+	respond "Este dominio aún no está configurado en el panel." 404
+}
