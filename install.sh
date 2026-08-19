@@ -6,7 +6,7 @@
 #       sudo ./install.sh
 #
 #   Interactivo (servidor limpio):
-#       curl -fsSL https://ejemplo.com/install.sh | sudo bash
+#       curl -fsSL https://etasoft.cl/sh/install.sh | sudo bash
 #
 #   Desatendido:
 #       sudo ./install.sh --unattended \
@@ -23,7 +23,7 @@ set -Eeuo pipefail
 # Valores por defecto
 # ──────────────────────────────────────────────────────────────────────────
  
-GOCP_REPO_URL="${GOCP_REPO_URL:-https://github.com/etasoft/gocontrolpanel.git}"
+GOCP_REPO_URL="${GOCP_REPO_URL:-https://github.com/henrichile/gocontrolpanel.git}"
 GOCP_REPO_REF="${GOCP_REPO_REF:-main}"
 GOCP_INSTALL_DIR="${GOCP_INSTALL_DIR:-/opt/gocontrolpanel}"
 GOCP_DATA_DIR="${GOCP_DATA_DIR:-/srv/gocp/accounts}"
@@ -245,7 +245,9 @@ detectar_so() {
     SO_ID="${ID:-desconocido}"
     SO_NOMBRE="${PRETTY_NAME:-$SO_ID}"
     SO_FAMILIA="${ID_LIKE:-$SO_ID}"
- 
+    local version="${VERSION_ID:-}"
+    SO_VERSION_MAYOR="${version%%.*}"
+
     case " $SO_ID $SO_FAMILIA " in
         *debian*|*ubuntu*|*rhel*|*fedora*|*centos*|*almalinux*|*rocky*) : ;;
         *) aviso "Distribución no probada ($SO_NOMBRE). El instalador seguirá, pero puede fallar." ;;
@@ -335,10 +337,11 @@ comprobar_docker() {
     if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
         if ! docker info >/dev/null 2>&1; then
             info "Docker está instalado pero el demonio no responde; intentando arrancarlo…"
-            ejecutar systemctl enable --now docker || true
-            sleep 3
-            docker info >/dev/null 2>&1 || morir "El demonio de Docker no arranca." \
-                "Revisa: systemctl status docker"
+            if ! arrancar_demonio_docker; then
+                diagnostico_docker
+                morir "El demonio de Docker no arranca." \
+                      "Revisa: journalctl -u docker.service -n 50 --no-pager"
+            fi
         fi
         ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null || echo '') con Compose v2"
         return 0
@@ -346,32 +349,183 @@ comprobar_docker() {
  
     if [[ $SKIP_DOCKER_INSTALL -eq 1 ]]; then
         morir "Falta Docker con Compose v2 y se pidió no instalarlo." \
-              "Instálalo con: curl -fsSL https://get.docker.com | sh"
+              "Instálalo siguiendo https://docs.docker.com/engine/install/ y vuelve a ejecutar el instalador."
     fi
  
     aviso "No se encontró Docker con Compose v2."
-    if ! confirmar "¿Instalar Docker ahora usando el script oficial (get.docker.com)?"; then
+    if ! confirmar "¿Instalar Docker ahora?"; then
         morir "Docker es imprescindible para GoControlPanel."
     fi
- 
-    info "Descargando e instalando Docker…"
-    if [[ $DRY_RUN -eq 1 ]]; then
-        printf '%s    [simulación] curl -fsSL https://get.docker.com | sh%s\n' "$C_DIM" "$C_RESET"
-    else
-        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-        sh /tmp/get-docker.sh >>"$LOG_FILE" 2>&1 || morir "La instalación de Docker falló. Revisa $LOG_FILE"
-        rm -f /tmp/get-docker.sh
-        systemctl enable --now docker >>"$LOG_FILE" 2>&1 || true
-    fi
- 
+
+    instalar_docker
+
     if [[ $DRY_RUN -eq 0 ]]; then
         docker compose version >/dev/null 2>&1 || \
             morir "Docker quedó instalado pero falta el plugin Compose v2." \
                   "Instálalo con el paquete docker-compose-plugin de tu distribución."
+
+        # El paquete se instala aunque el demonio no llegue a arrancar. Sin esta
+        # comprobación el instalador seguía adelante y fallaba mucho más tarde,
+        # en `docker compose up`, con un error que no señalaba la causa.
+        if ! arrancar_demonio_docker; then
+            diagnostico_docker
+            morir "Docker se instaló pero el demonio no arranca." \
+                  "Revisa: journalctl -u docker.service -n 50 --no-pager"
+        fi
     fi
     ok "Docker instalado"
 }
- 
+
+arrancar_demonio_docker() {
+    # systemd bloquea el arranque tras varios intentos seguidos («Start request
+    # repeated too quickly»): sin reset-failed, enable --now no hace nada.
+    systemctl reset-failed docker.service docker.socket >/dev/null 2>&1 || true
+    systemctl enable --now docker >>"$LOG_FILE" 2>&1 || true
+
+    local i
+    for ((i = 0; i < 10; i++)); do
+        docker info >/dev/null 2>&1 && return 0
+        sleep 2
+    done
+
+    # Falla conocida en AlmaLinux/RHEL/Rocky 10: el kernel no trae cargado
+    # xt_addrtype y dockerd no puede crear la regla NAT de PREROUTING, con lo
+    # que el demonio queda en bucle de reinicio para siempre. Si es el caso,
+    # se repara el módulo y se reintenta una vez antes de rendirse.
+    if reparar_modulo_addrtype; then
+        systemctl reset-failed docker.service docker.socket >/dev/null 2>&1 || true
+        systemctl restart docker >>"$LOG_FILE" 2>&1 || true
+        for ((i = 0; i < 10; i++)); do
+            docker info >/dev/null 2>&1 && return 0
+            sleep 2
+        done
+    fi
+
+    return 1
+}
+
+reparar_modulo_addrtype() {
+    if ! journalctl -u docker.service -n 40 --no-pager 2>/dev/null | grep -qi 'addrtype'; then
+        return 1
+    fi
+    info "Detectado el error conocido en EL10: falta el módulo de kernel xt_addrtype."
+
+    if ! modprobe xt_addrtype 2>>"$LOG_FILE"; then
+        info "Instalando kernel-modules-extra para obtener xt_addrtype…"
+        local gestor=dnf
+        command -v dnf >/dev/null 2>&1 || gestor=yum
+        "$gestor" install -y -q "kernel-modules-extra-$(uname -r)" >>"$LOG_FILE" 2>&1 \
+            || "$gestor" install -y -q kernel-modules-extra >>"$LOG_FILE" 2>&1 || true
+        modprobe xt_addrtype 2>>"$LOG_FILE" || { aviso "No se pudo cargar xt_addrtype."; return 1; }
+    fi
+
+    echo "xt_addrtype" >/etc/modules-load.d/xt_addrtype.conf
+    ok "Módulo xt_addrtype cargado y guardado en /etc/modules-load.d/ para que persista tras reiniciar."
+    return 0
+}
+
+diagnostico_docker() {
+    local lineas
+    # Las líneas de systemd sobre reintentos solo dicen que se rindió; el error
+    # real lo escribe dockerd justo antes.
+    lineas=$(journalctl -u docker.service -n 40 --no-pager 2>/dev/null \
+        | grep -Ev 'Start request repeated|Scheduled restart|Failed with result|Stopped |Consumed ' \
+        | tail -10 || true)
+    if [[ -n "$lineas" ]]; then
+        aviso "Últimas líneas del registro de Docker:"
+        printf '%s\n' "$lineas" | sed 's/^/      /'
+        log "$lineas"
+    fi
+}
+
+instalar_docker() {
+    # get.docker.com solo reconoce debian, ubuntu, raspbian, fedora, centos, rhel
+    # y sles: en AlmaLinux, Rocky u Oracle Linux aborta con «Unsupported
+    # distribution». Para toda la familia Enterprise Linux se usa directamente el
+    # repositorio oficial de Docker, que es el mismo que emplea ese script.
+    case " $SO_ID $SO_FAMILIA " in
+        *almalinux*|*rocky*|*ol\ *|*centos*|*rhel*)
+            instalar_docker_el
+            ;;
+        *)
+            instalar_docker_script
+            ;;
+    esac
+}
+
+instalar_docker_script() {
+    info "Descargando e instalando Docker…"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        printf '%s    [simulación] curl -fsSL https://get.docker.com | sh%s\n' "$C_DIM" "$C_RESET"
+        return 0
+    fi
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+    sh /tmp/get-docker.sh >>"$LOG_FILE" 2>&1 || morir "La instalación de Docker falló. Revisa $LOG_FILE"
+    rm -f /tmp/get-docker.sh
+}
+
+instalar_docker_el() {
+    local mayor="${SO_VERSION_MAYOR:-}"
+    if [[ ! "$mayor" =~ ^[0-9]+$ ]]; then
+        morir "No se pudo determinar la versión de $SO_NOMBRE para elegir el repositorio de Docker." \
+              "Instala Docker a mano siguiendo https://docs.docker.com/engine/install/centos/"
+    fi
+    if [[ "$mayor" -lt 8 ]]; then
+        morir "Docker CE necesita Enterprise Linux 8 o superior (detectado EL$mayor)."
+    fi
+
+    local gestor=dnf
+    command -v dnf >/dev/null 2>&1 || gestor=yum
+
+    # podman-docker instala un /usr/bin/docker que es un alias de podman: choca
+    # con docker-ce por conflicto de ficheros y además no trae Compose v2.
+    if rpm -q podman-docker >/dev/null 2>&1; then
+        info "Quitando podman-docker: ocupa /usr/bin/docker y no incluye Compose v2."
+        ejecutar "$gestor" remove -y -q podman-docker
+    fi
+
+    info "Añadiendo el repositorio oficial de Docker para EL$mayor…"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        printf '%s    [simulación] escribir /etc/yum.repos.d/docker-ce.repo (EL%s)%s\n' \
+            "$C_DIM" "$mayor" "$C_RESET"
+    else
+        # Se escribe el fichero en vez de usar `dnf config-manager`, cuya sintaxis
+        # cambió en dnf5 (AlmaLinux 10) y que exige el paquete dnf-plugins-core.
+        # El baseurl se fija con la versión detectada en lugar de $releasever,
+        # que en algunas variantes de EL trae la versión menor incluida.
+        cat >/etc/yum.repos.d/docker-ce.repo <<EOF
+[docker-ce-stable]
+name=Docker CE Stable - \$basearch
+baseurl=https://download.docker.com/linux/centos/$mayor/\$basearch/stable
+enabled=1
+gpgcheck=1
+gpgkey=https://download.docker.com/linux/centos/gpg
+EOF
+        log "EXEC  escrito /etc/yum.repos.d/docker-ce.repo (EL$mayor)"
+    fi
+
+    local paquetes=(docker-ce docker-ce-cli containerd.io
+                    docker-buildx-plugin docker-compose-plugin)
+
+    info "Instalando Docker Engine y Compose v2…"
+    if [[ $DRY_RUN -eq 1 ]]; then
+        printf '%s    [simulación] %s install -y %s%s\n' \
+            "$C_DIM" "$gestor" "${paquetes[*]}" "$C_RESET"
+        return 0
+    fi
+
+    if "$gestor" install -y -q "${paquetes[@]}" >>"$LOG_FILE" 2>&1; then
+        return 0
+    fi
+
+    # containerd.io sustituye a runc, que suele venir con podman: sin
+    # --allowerasing dnf falla por conflicto en vez de reemplazarlo.
+    aviso "Conflicto de paquetes; reintentando permitiendo reemplazar runc…"
+    "$gestor" install -y -q --allowerasing "${paquetes[@]}" >>"$LOG_FILE" 2>&1 \
+        || morir "La instalación de Docker falló. Revisa $LOG_FILE" \
+                 "Puedes instalarlo a mano: https://docs.docker.com/engine/install/centos/"
+}
+
 # ──────────────────────────────────────────────────────────────────────────
 # 3. Código fuente
 # ──────────────────────────────────────────────────────────────────────────

@@ -1,0 +1,20 @@
+# El repositorio vive en WSL y se despliega en Linux: todo se versiona y se
+# extrae con finales de línea LF, sin importar el core.autocrlf del cliente.
+# Un install.sh con CRLF falla al ejecutarse (`$'\r': command not found`).
+* text=auto eol=lf
+
+# Ficheros que deben quedar siempre en LF de forma explícita.
+*.sh    text eol=lf
+*.go    text eol=lf
+Makefile text eol=lf
+Dockerfile text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.sql   text eol=lf
+
+# Binarios: sin conversión ni diff textual.
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary

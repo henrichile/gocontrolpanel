@@ -42,7 +42,7 @@ services:
       GOCP_LISTEN_ADDR: ":8080"
       GOCP_PUBLIC_URL: ${GOCP_PUBLIC_URL:?define la URL pública del panel}
       GOCP_DATABASE_URL: postgres://gocp:${POSTGRES_PASSWORD:?}@postgres:5432/gocp?sslmode=disable
-      GOCP_JWT_SECRET: ${GOCP_JWT_SECRET:?genera uno con: openssl rand -hex 32}
+      GOCP_JWT_SECRET: "${GOCP_JWT_SECRET:?genera uno con: openssl rand -hex 32}"
       GOCP_CADDY_ADMIN_URL: http://edge:2019
       GOCP_CADDY_EMAIL: ${GOCP_CADDY_EMAIL:-}
       GOCP_DOCKER_HOST: unix:///var/run/docker.sock
