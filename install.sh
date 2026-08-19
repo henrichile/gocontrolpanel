@@ -28,6 +28,7 @@ GOCP_REPO_REF="${GOCP_REPO_REF:-main}"
 GOCP_INSTALL_DIR="${GOCP_INSTALL_DIR:-/opt/gocontrolpanel}"
 GOCP_DATA_DIR="${GOCP_DATA_DIR:-/srv/gocp/accounts}"
 GOCP_PHP_VERSIONS="${GOCP_PHP_VERSIONS:-8.3 8.4}"
+GOCP_DOCKER_GID="${GOCP_DOCKER_GID:-}"
  
 GOCP_DOMAIN="${GOCP_DOMAIN:-}"
 GOCP_EMAIL="${GOCP_EMAIL:-}"
@@ -695,6 +696,10 @@ EOF
  
 preparar_directorios() {
     ejecutar mkdir -p "$GOCP_DATA_DIR"
+    # La imagen del panel es distroless y corre como el usuario "nonroot"
+    # (UID/GID 65532 fijos en esa imagen base, ver Dockerfile): sin esta
+    # propiedad, el panel no puede crear el directorio de cada cuenta nueva.
+    ejecutar chown 65532:65532 "$GOCP_DATA_DIR"
     ejecutar chmod 750 "$GOCP_DATA_DIR"
     ok "Directorio de cuentas: $GOCP_DATA_DIR"
  

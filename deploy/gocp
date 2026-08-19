@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+#
+# gocp — comando de gestión de GoControlPanel.
+#
+# install.sh lo copia a /usr/local/bin/gocp y fija la ruta del proyecto
+# reescribiendo la línea GOCP_INSTALL_DIR de abajo con sed; no la muevas ni
+# le cambies el formato.
+
+set -Eeuo pipefail
+
+GOCP_INSTALL_DIR="${GOCP_INSTALL_DIR:-/opt/gocontrolpanel}"
+
+if [[ ! -f "$GOCP_INSTALL_DIR/docker-compose.yml" ]]; then
+    echo "No se encontró GoControlPanel en $GOCP_INSTALL_DIR" >&2
+    exit 1
+fi
+cd "$GOCP_INSTALL_DIR"
+
+uso() {
+    cat <<EOF
+gocp — gestión de GoControlPanel
+
+  gocp status              estado de los servicios
+  gocp logs [servicio]     registros en vivo (por defecto: panel)
+  gocp restart             reinicia todos los servicios
+  gocp backup [ruta]       copia de seguridad completa (por defecto: /var/backups/gocp)
+  gocp update               actualiza el código y reconstruye los servicios
+  gocp password             genera una contraseña nueva para el administrador
+  -h, --help                esta ayuda
+EOF
+}
+
+leer_env() {
+    # leer_env <clave> ; imprime el valor de esa clave en .env, o nada
+    grep -E "^${1}=" "$GOCP_INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+cmd_status() {
+    docker compose ps
+}
+
+cmd_logs() {
+    docker compose logs -f --tail=200 "${1:-panel}"
+}
+
+cmd_restart() {
+    docker compose restart
+    docker compose ps
+}
+
+cmd_backup() {
+    local destino="${1:-/var/backups/gocp}"
+    local marca
+    marca="$(date +%Y%m%d-%H%M%S)"
+    local trabajo
+    trabajo="$(mktemp -d)"
+    trap 'rm -rf "$trabajo"' RETURN
+
+    mkdir -p "$destino"
+
+    echo "→ Volcando PostgreSQL…"
+    docker compose exec -T postgres pg_dump -U gocp gocp \
+        >"$trabajo/postgres.sql"
+
+    local mysql_pass
+    mysql_pass="$(leer_env MYSQL_ROOT_PASSWORD)"
+    if [[ -n "$mysql_pass" ]]; then
+        echo "→ Volcando MySQL/MariaDB…"
+        docker compose exec -T mysql \
+            mysqldump -uroot -p"$mysql_pass" --all-databases --single-transaction \
+            >"$trabajo/mysql.sql"
+    fi
+
+    echo "→ Copiando configuración…"
+    cp "$GOCP_INSTALL_DIR/.env" "$trabajo/env"
+
+    local sitios_root
+    sitios_root="$(leer_env GOCP_SITES_ROOT)"
+    sitios_root="${sitios_root:-/srv/gocp/accounts}"
+    local paquete="$destino/gocp-backup-$marca.tar.gz"
+
+    echo "→ Empaquetando cuentas de clientes ($sitios_root)…"
+    tar -czf "$paquete" \
+        -C "$trabajo" postgres.sql env $([[ -f "$trabajo/mysql.sql" ]] && echo mysql.sql) \
+        -C "$(dirname "$sitios_root")" "$(basename "$sitios_root")"
+
+    chmod 600 "$paquete"
+    echo "✓ Copia de seguridad en $paquete"
+}
+
+cmd_update() {
+    if [[ -d "$GOCP_INSTALL_DIR/.git" ]]; then
+        echo "→ Actualizando el código…"
+        git -C "$GOCP_INSTALL_DIR" pull --ff-only
+    else
+        echo "! $GOCP_INSTALL_DIR no es un repositorio git; omito la actualización del código."
+    fi
+
+    echo "→ Reconstruyendo y reiniciando los servicios…"
+    docker compose up -d --build
+
+    echo "→ Aplicando migraciones…"
+    docker compose exec -T panel /usr/local/bin/gocpd migrate
+
+    echo "✓ GoControlPanel actualizado"
+    docker compose ps
+}
+
+cmd_password() {
+    local nueva
+    nueva="$(openssl rand -base64 48 | tr -dc 'A-Za-z0-9' | head -c 18)"
+
+    if grep -qE '^GOCP_ADMIN_PASSWORD=' "$GOCP_INSTALL_DIR/.env"; then
+        sed -i "s#^GOCP_ADMIN_PASSWORD=.*#GOCP_ADMIN_PASSWORD=${nueva}#" "$GOCP_INSTALL_DIR/.env"
+    else
+        printf 'GOCP_ADMIN_PASSWORD=%s\n' "$nueva" >>"$GOCP_INSTALL_DIR/.env"
+    fi
+
+    local admin_user
+    admin_user="$(leer_env GOCP_ADMIN_USER)"
+    admin_user="${admin_user:-admin}"
+
+    docker compose exec -T -e "GOCP_ADMIN_PASSWORD=$nueva" panel \
+        /usr/local/bin/gocpd createadmin
+
+    echo "✓ Nueva contraseña para '$admin_user': $nueva"
+}
+
+cmd="${1:-}"
+[[ $# -gt 0 ]] && shift
+
+case "$cmd" in
+    status)    cmd_status ;;
+    logs)      cmd_logs "${1:-}" ;;
+    restart)   cmd_restart ;;
+    backup)    cmd_backup "${1:-}" ;;
+    update)    cmd_update ;;
+    password)  cmd_password ;;
+    -h|--help|"") uso ;;
+    *)
+        echo "Comando desconocido: $cmd" >&2
+        uso >&2
+        exit 1
+        ;;
+esac
