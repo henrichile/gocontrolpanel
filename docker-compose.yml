@@ -32,6 +32,11 @@ services:
         VERSION: ${GOCP_VERSION:-dev}
     container_name: gocp-panel
     restart: unless-stopped
+    # El panel corre como usuario "nonroot" (imagen distroless) y necesita
+    # pertenecer al grupo dueño de /var/run/docker.sock en el host para poder
+    # hablar con el demonio; ese GID varía entre distros y lo detecta install.sh.
+    group_add:
+      - "${GOCP_DOCKER_GID:?falta detectar el GID del grupo docker; vuelve a ejecutar install.sh}"
     depends_on:
       postgres:
         condition: service_healthy

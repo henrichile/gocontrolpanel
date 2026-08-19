@@ -637,7 +637,19 @@ escribir_env() {
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generar_secreto 32)}"
     MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(generar_secreto 32)}"
     JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 32)}"
- 
+
+    # El panel corre como usuario "nonroot" dentro del contenedor y necesita
+    # el GID del grupo dueño de /var/run/docker.sock para poder hablar con el
+    # demonio; sin esto arranca en bucle con "permission denied". El GID
+    # varía entre distros (999, 998, docker, dockerroot…), así que se detecta
+    # aquí en vez de fijarlo en el docker-compose.yml.
+    local socket_grupo
+    socket_grupo="$(stat -c '%G' /var/run/docker.sock 2>/dev/null || echo docker)"
+    DOCKER_GID="$(getent group "$socket_grupo" 2>/dev/null | cut -d: -f3 || true)"
+    if [[ -z "$DOCKER_GID" ]]; then
+        DOCKER_GID="$(stat -c '%g' /var/run/docker.sock 2>/dev/null || echo 999)"
+    fi
+
     local esquema="https"
     [[ $NO_TLS -eq 1 ]] && esquema="http"
  
@@ -670,6 +682,7 @@ GOCP_DOCKER_NETWORK=gocontrolpanel_sites
 GOCP_SITE_IMAGE_PREFIX=gocp/frankenphp
 GOCP_SITES_ROOT=${GOCP_DATA_DIR}
 GOCP_PANEL_UPSTREAM=gocp-panel:8080
+GOCP_DOCKER_GID=${DOCKER_GID}
  
 GOCP_ACCESS_TTL=15m
 GOCP_REFRESH_TTL=720h
