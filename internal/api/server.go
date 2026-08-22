@@ -123,6 +123,15 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/accounts/{accountID}/ftp", s.handleCreateFTP)
 			r.Delete("/ftp/{ftpID}", s.handleDeleteFTP)
 
+			// Explorador de archivos (misma raíz que ve el acceso SFTP)
+			r.Get("/accounts/{accountID}/files", s.handleListFiles)
+			r.Post("/accounts/{accountID}/files/upload", s.handleUploadFiles)
+			r.Get("/accounts/{accountID}/files/download", s.handleDownloadFile)
+			r.Delete("/accounts/{accountID}/files", s.handleDeleteFile)
+			r.Post("/accounts/{accountID}/files/mkdir", s.handleMkdir)
+			r.Post("/accounts/{accountID}/files/rename", s.handleRenameFile)
+			r.Post("/accounts/{accountID}/files/extract", s.handleExtractZip)
+
 			// Cron
 			r.Get("/sites/{siteID}/cron", s.handleListCron)
 			r.Post("/sites/{siteID}/cron", s.handleCreateCron)

@@ -69,7 +69,9 @@ export async function request<T>(
   retry = true,
 ): Promise<T> {
   const headers = new Headers(options.headers)
-  if (!headers.has('Content-Type') && options.body) {
+  // FormData fija su propio Content-Type (con el boundary del multipart);
+  // fijarlo nosotros a mano lo rompería.
+  if (!headers.has('Content-Type') && options.body && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
   const access = tokens.access
@@ -108,6 +110,38 @@ export const api = {
   put: <T,>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PUT', body: body ? JSON.stringify(body) : undefined }),
   del: <T,>(path: string) => request<T>(path, { method: 'DELETE' }),
+  upload: <T,>(path: string, form: FormData) => request<T>(path, { method: 'POST', body: form }),
+  // Descarga autenticada: el token vive en sessionStorage, no en una cookie,
+  // así que un <a href> normal no lo mandaría — hay que pedirlo por fetch y
+  // guardarlo desde un blob.
+  download: (path: string, filename: string) => downloadFile(path, filename),
+}
+
+async function downloadFile(path: string, filename: string): Promise<void> {
+  const headers = new Headers()
+  const access = tokens.access
+  if (access) headers.set('Authorization', `Bearer ${access}`)
+
+  let res = await fetch(`/api/v1${path}`, { headers })
+  if (res.status === 401 && (await tryRefresh())) {
+    const retryHeaders = new Headers()
+    if (tokens.access) retryHeaders.set('Authorization', `Bearer ${tokens.access}`)
+    res = await fetch(`/api/v1${path}`, { headers: retryHeaders })
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw makeError(res.status, body.error ?? 'No se pudo descargar el archivo')
+  }
+
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 // --- Tipos que devuelve la API --------------------------------------------
@@ -205,6 +239,14 @@ export interface FTPAccount {
   quota_mb: number
   is_active: boolean
   created_at: string
+}
+
+export interface FileEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  size_b: number
+  mod_time: string
 }
 
 export interface CronJob {

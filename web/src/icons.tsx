@@ -19,6 +19,11 @@ export type IconName =
   | 'redeploy'
   | 'globe'
   | 'folder'
+  | 'file'
+  | 'upload'
+  | 'download'
+  | 'archive'
+  | 'edit'
   | 'chevron-right'
 
 const PATHS: Record<IconName, string> = {
@@ -41,6 +46,11 @@ const PATHS: Record<IconName, string> = {
   globe:
     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-9-9h18M12 3a13 13 0 0 1 0 18 13 13 0 0 1 0-18Z',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
+  file: 'M6 3h8l5 5v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Zm8 0v5h5',
+  upload: 'M12 20V6M6 12l6-6 6 6M4 20h16',
+  download: 'M12 4v14M6 12l6 6 6-6M4 20h16',
+  archive: 'M4 4h16v4H4V4Zm1 4h14v12H5V8Zm5 3h4v3h-4v-3Z',
+  edit: 'M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3Zm10.5-14.5 3 3',
   'chevron-right': 'm9 6 6 6-6 6',
 }
 

@@ -5,6 +5,7 @@ import {
   Alert, Card, Empty, LiveMetric, Meter, Modal, Spinner, StatCard, StatusBadge,
   formatMB, useConfirm, useLiveStats,
 } from '../components'
+import { FileManager } from '../filemanager'
 import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
 
@@ -19,7 +20,7 @@ export default function AccountDetail() {
   const [sftpHost, setSftpHost] = useState('')
   const [sftpPort, setSftpPort] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'sitios' | 'bases' | 'sftp'>('sitios')
+  const [tab, setTab] = useState<'sitios' | 'archivos' | 'bases' | 'sftp'>('sitios')
   const [creatingSite, setCreatingSite] = useState(false)
   const [creatingDB, setCreatingDB] = useState(false)
   const [creatingFTP, setCreatingFTP] = useState(false)
@@ -150,6 +151,9 @@ export default function AccountDetail() {
         <button className={tab === 'sitios' ? 'active' : ''} onClick={() => setTab('sitios')}>
           Sitios
         </button>
+        <button className={tab === 'archivos' ? 'active' : ''} onClick={() => setTab('archivos')}>
+          Archivos
+        </button>
         <button className={tab === 'bases' ? 'active' : ''} onClick={() => setTab('bases')}>
           Bases de datos
         </button>
@@ -183,6 +187,8 @@ export default function AccountDetail() {
           )}
         </Card>
       )}
+
+      {tab === 'archivos' && <FileManager accountID={account.id} />}
 
       {tab === 'bases' && (
         <Card>
