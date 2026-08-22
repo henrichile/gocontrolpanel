@@ -24,6 +24,8 @@ export type IconName =
   | 'download'
   | 'archive'
   | 'edit'
+  | 'home'
+  | 'image'
   | 'chevron-right'
 
 const PATHS: Record<IconName, string> = {
@@ -51,6 +53,8 @@ const PATHS: Record<IconName, string> = {
   download: 'M12 4v14M6 12l6 6 6-6M4 20h16',
   archive: 'M4 4h16v4H4V4Zm1 4h14v12H5V8Zm5 3h4v3h-4v-3Z',
   edit: 'M4 20h4L18.5 9.5a2.1 2.1 0 0 0-3-3L5 17v3Zm10.5-14.5 3 3',
+  home: 'M3 11.5 12 4l9 7.5M5.5 10v9a1 1 0 0 0 1 1h4v-6h3v6h4a1 1 0 0 0 1-1v-9',
+  image: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm2 12 4.5-5.5 3 3.5L17 10l4 7H6Z',
   'chevron-right': 'm9 6 6 6-6 6',
 }
 

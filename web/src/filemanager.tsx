@@ -22,6 +22,14 @@ function joinPath(dir: string, name: string): string {
   return dir ? `${dir}/${name}` : name
 }
 
+function iconFor(entry: FileEntry): 'folder' | 'archive' | 'image' | 'file' {
+  if (entry.is_dir) return 'folder'
+  const ext = entry.name.toLowerCase().split('.').pop() ?? ''
+  if (['zip', 'tar', 'gz', 'tgz', 'rar', '7z'].includes(ext)) return 'archive'
+  if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'avif'].includes(ext)) return 'image'
+  return 'file'
+}
+
 // Explorador de archivos de la cuenta: navega la misma carpeta que ve el
 // acceso SFTP (la raíz completa, no un sitio en particular).
 export function FileManager({ accountID }: { accountID: string }) {
@@ -139,20 +147,29 @@ export function FileManager({ accountID }: { accountID: string }) {
       {confirmDialog}
       {promptDialog}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-        <nav aria-label="Ruta actual" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, flexWrap: 'wrap' }}>
-          <button className="sm ghost" onClick={() => void load('')}>
-            <Icon name="folder" size={14} />raíz
-          </button>
-          {crumbs.map((c, i) => (
-            <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <Icon name="chevron-right" size={13} style={{ color: 'var(--ink-muted)' }} />
-              <button className="sm ghost" onClick={() => void load(crumbs.slice(0, i + 1).join('/'))}>
-                {c}
-              </button>
-            </span>
-          ))}
-        </nav>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
+        <div>
+          <nav aria-label="Ruta actual" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, flexWrap: 'wrap' }}>
+            <button className="sm ghost" onClick={() => void load('')} disabled={!path}>
+              <Icon name="home" size={14} />raíz
+            </button>
+            {crumbs.map((c, i) => (
+              <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Icon name="chevron-right" size={13} style={{ color: 'var(--ink-muted)' }} />
+                <button className="sm ghost" onClick={() => void load(crumbs.slice(0, i + 1).join('/'))}>
+                  {c}
+                </button>
+              </span>
+            ))}
+          </nav>
+          {!loading && (
+            <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>
+              {entries.length === 0
+                ? 'Carpeta vacía — arrastra archivos aquí o usa "Subir archivos".'
+                : `${entries.length} elemento${entries.length === 1 ? '' : 's'} · arrastra archivos aquí para subirlos`}
+            </p>
+          )}
+        </div>
         <div className="actions">
           <button className="sm" onClick={mkdir}>
             <Icon name="plus" size={14} />Carpeta
@@ -173,19 +190,20 @@ export function FileManager({ accountID }: { accountID: string }) {
         </div>
       </div>
 
+      {uploading && (
+        <div className="fm-progress" role="progressbar" aria-label="Subiendo archivos">
+          <span />
+        </div>
+      )}
+
       <div
+        className={`fm-dropzone${dragOver ? ' over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
           e.preventDefault()
           setDragOver(false)
           if (e.dataTransfer.files.length) void uploadFiles(e.dataTransfer.files)
-        }}
-        style={{
-          borderRadius: 8,
-          outline: dragOver ? '2px dashed var(--series-1)' : '2px dashed transparent',
-          outlineOffset: -2,
-          transition: 'outline-color .15s ease',
         }}
       >
         {loading ? (
@@ -199,23 +217,22 @@ export function FileManager({ accountID }: { accountID: string }) {
             </thead>
             <tbody>
               {entries.map((e) => (
-                <tr key={e.path}>
+                <tr
+                  key={e.path}
+                  className={`fm-row${e.is_dir ? ' dir' : ''}`}
+                  onClick={e.is_dir ? () => void load(e.path) : undefined}
+                >
                   <td className="strong">
-                    {e.is_dir ? (
-                      <button className="ghost sm" style={{ padding: 0, fontWeight: 500 }}
-                              onClick={() => void load(e.path)}>
-                        <Icon name="folder" size={15} style={{ color: 'var(--series-1)' }} />{e.name}
-                      </button>
-                    ) : (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                        <Icon name="file" size={15} style={{ color: 'var(--ink-muted)' }} />{e.name}
-                      </span>
-                    )}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                      <Icon name={iconFor(e)} size={15}
+                            style={{ color: e.is_dir ? 'var(--series-1)' : 'var(--ink-muted)' }} />
+                      {e.name}
+                    </span>
                   </td>
                   <td className="muted">{e.is_dir ? '—' : formatBytes(e.size_b)}</td>
                   <td className="muted">{formatDate(e.mod_time)}</td>
                   <td>
-                    <div className="actions">
+                    <div className="actions fm-row-actions" onClick={(ev) => ev.stopPropagation()}>
                       {!e.is_dir && e.name.toLowerCase().endsWith('.zip') && (
                         <button className="sm ghost" onClick={() => void extract(e)} title="Extraer .zip">
                           <Icon name="archive" size={14} />
