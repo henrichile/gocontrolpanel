@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, type FileEntry } from './api'
 import { Card, Empty, Spinner, useConfirm, useReasonPrompt } from './components'
+import { FileEditor, isEditableFile } from './fileeditor'
 import { Icon } from './icons'
 import { errorMessage, useToast } from './toast'
 
@@ -42,6 +43,7 @@ export function FileManager({ accountID }: { accountID: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { ask, dialog: promptDialog } = useReasonPrompt()
+  const [editing, setEditing] = useState<FileEntry | null>(null)
 
   const load = useCallback(async (p: string) => {
     setLoading(true)
@@ -219,8 +221,14 @@ export function FileManager({ accountID }: { accountID: string }) {
               {entries.map((e) => (
                 <tr
                   key={e.path}
-                  className={`fm-row${e.is_dir ? ' dir' : ''}`}
-                  onClick={e.is_dir ? () => void load(e.path) : undefined}
+                  className={`fm-row${e.is_dir ? ' dir' : isEditableFile(e.name) ? ' file' : ''}`}
+                  onClick={
+                    e.is_dir
+                      ? () => void load(e.path)
+                      : isEditableFile(e.name)
+                        ? () => setEditing(e)
+                        : undefined
+                  }
                 >
                   <td className="strong">
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -236,6 +244,11 @@ export function FileManager({ accountID }: { accountID: string }) {
                       {!e.is_dir && e.name.toLowerCase().endsWith('.zip') && (
                         <button className="sm ghost" onClick={() => void extract(e)} title="Extraer .zip">
                           <Icon name="archive" size={14} />
+                        </button>
+                      )}
+                      {!e.is_dir && isEditableFile(e.name) && (
+                        <button className="sm ghost" onClick={() => setEditing(e)} title="Editar">
+                          <Icon name="edit" size={14} />
                         </button>
                       )}
                       {!e.is_dir && (
@@ -257,6 +270,15 @@ export function FileManager({ accountID }: { accountID: string }) {
           </table>
         )}
       </div>
+
+      {editing && (
+        <FileEditor
+          accountID={accountID}
+          path={editing.path}
+          name={editing.name}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </Card>
   )
 }

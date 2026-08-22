@@ -189,6 +189,89 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, full)
 }
 
+// maxEditableBytes acota lo que el editor de texto integrado puede abrir o
+// guardar: es para editar configuraciones y código, no para volcar archivos
+// grandes por esta vía (para eso está la descarga/subida normal).
+const maxEditableBytes = 4 << 20 // 4 MB
+
+func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
+	root, ok := s.accountFilesRoot(w, r)
+	if !ok {
+		return
+	}
+	full, err := safePath(root, r.URL.Query().Get("path"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	info, err := os.Stat(full)
+	if err != nil || info.IsDir() {
+		httpx.Error(w, http.StatusNotFound, "archivo no encontrado")
+		return
+	}
+	if info.Size() > maxEditableBytes {
+		httpx.Error(w, http.StatusRequestEntityTooLarge, "el archivo es demasiado grande para editarlo aquí")
+		return
+	}
+	data, err := os.ReadFile(full)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if looksBinary(data) {
+		httpx.Error(w, http.StatusUnsupportedMediaType, "el archivo no parece ser de texto")
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(data)
+}
+
+func (s *Server) handleWriteFileContent(w http.ResponseWriter, r *http.Request) {
+	root, ok := s.accountFilesRoot(w, r)
+	if !ok {
+		return
+	}
+	full, err := safePath(root, r.URL.Query().Get("path"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if info, err := os.Stat(full); err == nil && info.IsDir() {
+		httpx.Error(w, http.StatusBadRequest, "no se puede editar una carpeta")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxEditableBytes)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpx.Error(w, http.StatusRequestEntityTooLarge, "el contenido supera el límite permitido")
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := os.WriteFile(full, data, 0o644); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	httpx.OK(w, map[string]any{"path": toRelative(root, full)})
+}
+
+// looksBinary aplica la heurística habitual: un byte nulo en los primeros
+// bytes del archivo casi siempre significa que no es texto plano.
+func looksBinary(data []byte) bool {
+	n := len(data)
+	if n > 8000 {
+		n = 8000
+	}
+	for _, b := range data[:n] {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	root, ok := s.accountFilesRoot(w, r)
 	if !ok {

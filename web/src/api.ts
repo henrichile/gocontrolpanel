@@ -115,6 +115,15 @@ export const api = {
   // así que un <a href> normal no lo mandaría — hay que pedirlo por fetch y
   // guardarlo desde un blob.
   download: (path: string, filename: string) => downloadFile(path, filename),
+  // Contenido de archivo de texto: se envía/recibe tal cual, sin envolverlo
+  // en JSON (así no hay que escapar el contenido del archivo).
+  getText: (path: string) => request<string>(path),
+  putText: (path: string, body: string) =>
+    request<{ path: string }>(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      body,
+    }),
 }
 
 async function downloadFile(path: string, filename: string): Promise<void> {

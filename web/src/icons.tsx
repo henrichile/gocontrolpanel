@@ -27,6 +27,8 @@ export type IconName =
   | 'home'
   | 'image'
   | 'chevron-right'
+  | 'x'
+  | 'save'
 
 const PATHS: Record<IconName, string> = {
   'hard-drive':
@@ -56,6 +58,8 @@ const PATHS: Record<IconName, string> = {
   home: 'M3 11.5 12 4l9 7.5M5.5 10v9a1 1 0 0 0 1 1h4v-6h3v6h4a1 1 0 0 0 1-1v-9',
   image: 'M4 5h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Zm2 12 4.5-5.5 3 3.5L17 10l4 7H6Z',
   'chevron-right': 'm9 6 6 6-6 6',
+  x: 'M18 6 6 18M6 6l12 12',
+  save: 'M5 4h11l3 3v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Zm3 0v5h8V4M8 13h8v7H8v-7Z',
 }
 
 export function Icon({

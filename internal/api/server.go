@@ -127,6 +127,8 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/accounts/{accountID}/files", s.handleListFiles)
 			r.Post("/accounts/{accountID}/files/upload", s.handleUploadFiles)
 			r.Get("/accounts/{accountID}/files/download", s.handleDownloadFile)
+			r.Get("/accounts/{accountID}/files/content", s.handleReadFileContent)
+			r.Put("/accounts/{accountID}/files/content", s.handleWriteFileContent)
 			r.Delete("/accounts/{accountID}/files", s.handleDeleteFile)
 			r.Post("/accounts/{accountID}/files/mkdir", s.handleMkdir)
 			r.Post("/accounts/{accountID}/files/rename", s.handleRenameFile)

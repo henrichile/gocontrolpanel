@@ -571,20 +571,40 @@ $site = %q;
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Sitio activo</title>
   <style>
-    body{font-family:system-ui,-apple-system,sans-serif;margin:0;display:grid;
-         place-items:center;min-height:100vh;background:#0f172a;color:#e2e8f0}
-    .card{max-width:36rem;padding:2.5rem;background:#1e293b;border-radius:12px;
-          box-shadow:0 10px 40px rgba(0,0,0,.4)}
-    h1{margin:0 0 .5rem;font-size:1.5rem}
-    code{background:#0f172a;padding:.15rem .4rem;border-radius:4px}
-    .muted{color:#94a3b8;font-size:.9rem}
+    :root{color-scheme:dark}
+    *{box-sizing:border-box}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+         margin:0;min-height:100vh;display:grid;place-items:center;
+         background:radial-gradient(circle at 50%% -10%%,#1e293b,#020617 60%%);color:#e2e8f0;
+         padding:1.5rem}
+    .card{max-width:34rem;width:100%%;padding:3rem 2.5rem;background:rgba(30,41,59,.55);
+          border:1px solid rgba(148,163,184,.15);border-radius:20px;
+          box-shadow:0 20px 60px rgba(0,0,0,.45);backdrop-filter:blur(12px);
+          text-align:center}
+    .badge{width:56px;height:56px;margin:0 auto 1.5rem;border-radius:16px;
+           background:linear-gradient(135deg,#38bdf8,#6366f1);display:grid;place-items:center;
+           box-shadow:0 8px 24px rgba(99,102,241,.35)}
+    .badge svg{width:28px;height:28px}
+    h1{margin:0 0 .6rem;font-size:1.4rem;font-weight:600;letter-spacing:-.01em}
+    .site{display:inline-block;margin:0 0 1.25rem;padding:.3rem .8rem;border-radius:999px;
+          background:rgba(56,189,248,.12);color:#7dd3fc;font-size:.9rem;font-weight:500;
+          border:1px solid rgba(56,189,248,.25)}
+    p.muted{margin:0;color:#94a3b8;font-size:.95rem;line-height:1.6}
+    .footer{margin-top:2rem;padding-top:1.5rem;border-top:1px solid rgba(148,163,184,.12);
+            color:#475569;font-size:.78rem;letter-spacing:.02em}
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>El sitio <code><?= htmlspecialchars($site) ?></code> está funcionando</h1>
-    <p class="muted">Servido por FrankenPHP <?= PHP_VERSION ?> sobre Caddy.</p>
-    <p class="muted">Sube tu aplicación al directorio raíz para reemplazar esta página.</p>
+    <div class="badge">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M20 6 9 17l-5-5"/>
+      </svg>
+    </div>
+    <h1>Tu sitio está listo</h1>
+    <span class="site"><?= htmlspecialchars($site) ?></span>
+    <p class="muted">Todavía no hay contenido publicado.<br>Sube tu aplicación al directorio raíz para reemplazar esta página.</p>
+    <div class="footer">Hospedado con GoControlPanel</div>
   </div>
 </body>
 </html>
