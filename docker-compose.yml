@@ -1,6 +1,31 @@
 name: gocontrolpanel
 
 services:
+  # --- Prepara /srv/gocp/accounts antes de arrancar el panel ---------------
+  # El panel corre sin privilegios (usuario "nonroot", imagen distroless) y no
+  # puede hacer chown de su propio directorio de datos. Este servicio corre
+  # como root, una sola vez en cada "docker compose up", y deja el directorio
+  # con el dueño y los permisos correctos, sin importar en qué estado haya
+  # quedado en el host (recién creado por root, restaurado de un backup,
+  # etc.). Así el panel nunca falla con "permission denied" al crear la
+  # carpeta de una cuenta nueva y no hace falta ningún chown manual.
+  volumes-init:
+    image: busybox:1
+    container_name: gocp-volumes-init
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        mkdir -p /data
+        chown 65532:65532 /data
+        chmod 750 /data
+    volumes:
+      # ":z" re-etiqueta el directorio para SELinux (RHEL/AlmaLinux/Rocky con
+      # SELinux en enforcing); en distros sin SELinux la opción se ignora.
+      - /srv/gocp/accounts:/data:z
+    restart: "no"
+
   # --- Caddy de borde: TLS y reverse proxy hacia los sitios ----------------
   edge:
     image: caddy:2-alpine
@@ -38,6 +63,8 @@ services:
     group_add:
       - "${GOCP_DOCKER_GID:?falta detectar el GID del grupo docker; vuelve a ejecutar install.sh}"
     depends_on:
+      volumes-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       edge:
@@ -66,7 +93,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Misma ruta dentro y fuera del contenedor, para que los bind mounts que
       # el panel pide a Docker apunten a directorios reales del host.
-      - /srv/gocp/accounts:/srv/gocp/accounts
+      # ":z" re-etiqueta el directorio para SELinux (RHEL/AlmaLinux/Rocky con
+      # SELinux en enforcing); en distros sin SELinux la opción se ignora.
+      - /srv/gocp/accounts:/srv/gocp/accounts:z
     networks:
       - sites
     healthcheck:

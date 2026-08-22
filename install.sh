@@ -704,10 +704,14 @@ preparar_directorios() {
     ok "Directorio de cuentas: $GOCP_DATA_DIR"
  
     # docker-compose.yml monta esta ruta en el mismo punto dentro y fuera del
-    # contenedor. Si el usuario la cambió, hay que reflejarlo en el compose.
+    # contenedor (servicio "panel"), y también en el servicio "volumes-init"
+    # que la prepara en cada arranque. Si el usuario la cambió, hay que
+    # reflejarlo en ambos montajes.
     if [[ "$GOCP_DATA_DIR" != "/srv/gocp/accounts" && $DRY_RUN -eq 0 ]]; then
         info "Ajustando docker-compose.yml para usar $GOCP_DATA_DIR"
-        sed -i "s#/srv/gocp/accounts:/srv/gocp/accounts#${GOCP_DATA_DIR}:${GOCP_DATA_DIR}#" \
+        sed -i \
+            -e "s#/srv/gocp/accounts:/srv/gocp/accounts#${GOCP_DATA_DIR}:${GOCP_DATA_DIR}#" \
+            -e "s#/srv/gocp/accounts:/data#${GOCP_DATA_DIR}:/data#" \
             "$GOCP_INSTALL_DIR/docker-compose.yml"
     fi
 }
