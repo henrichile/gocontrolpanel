@@ -89,6 +89,49 @@ export function Stat({ label, value, hint }: { label: string; value: ReactNode; 
   )
 }
 
+export type Tone = 'blue' | 'violet' | 'teal' | 'rose'
+
+// Ficha de estadística con acento de color: el icono vive en una pastilla
+// tintada (identifica la categoría de un vistazo) y, cuando hay un tope
+// conocido (cuota, máximo del plan), una barra angosta muestra qué tan
+// cerca está sin obligar a leer los números.
+export function StatCard({ icon, tone, label, value, hint, used, max }: {
+  icon: Parameters<typeof Icon>[0]['name']
+  tone: Tone
+  label: string
+  value: ReactNode
+  hint?: string
+  used?: number
+  max?: number
+}) {
+  return (
+    <div className="stat">
+      <span className={`stat-icon tone-${tone}`}><Icon name={icon} size={17} /></span>
+      <div className="value">{value}</div>
+      <div className="label">{label}</div>
+      {typeof used === 'number' && typeof max === 'number' && (
+        <Meter tone={tone} value={used} max={max} />
+      )}
+      {hint && <div className="hint">{hint}</div>}
+    </div>
+  )
+}
+
+export function Meter({ tone, value, max, compact }: {
+  tone: Tone
+  value: number
+  max: number
+  /** Ancho fijo y angosto, para usar dentro de una celda de tabla en vez de a lo ancho de una tarjeta. */
+  compact?: boolean
+}) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0
+  return (
+    <div className={compact ? 'meter sm' : 'meter'} role="img" aria-label={`${Math.round(pct)}% usado`}>
+      <span className={`tone-${tone}`} style={{ width: `${pct}%` }} />
+    </div>
+  )
+}
+
 type BadgeTone = 'ok' | 'warn' | 'err' | 'idle'
 
 const siteTone: Record<string, BadgeTone> = {

@@ -229,6 +229,73 @@ a:hover {
   color: var(--series-1);
 }
 
+/* --- Pastillas de color por categoría --------------------------------------
+   Cuatro tonos distintos entre sí y de los colores de estado (fijos, nunca se
+   reutilizan). Contraste del icono verificado ≥3:1 sobre blanco:
+   blue 4.4:1 · violet 8.6:1 · teal 5.3:1 · rose 6.3:1. */
+
+.tone-blue { --tone: #2a78d6; }
+.tone-violet { --tone: #4a3aa7; }
+.tone-teal { --tone: #0f7a57; }
+.tone-rose { --tone: #a83368; }
+
+.stat-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 12%, white);
+  margin-bottom: 12px;
+}
+
+.stat .value {
+  font-variant-numeric: tabular-nums;
+}
+
+.meter {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.meter span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--tone);
+  transition: width 0.5s ease;
+}
+
+.meter.sm {
+  width: 46px;
+  margin-top: 0;
+}
+
+.live-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* --- Avatar de cuenta (encabezado) ------------------------------------------ */
+
+.account-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  font-weight: 650;
+  color: #fff;
+  background: linear-gradient(155deg, var(--series-1), #4a3aa7);
+  flex: none;
+}
+
 .stat .value {
   font-size: 28px;
   font-weight: 600;

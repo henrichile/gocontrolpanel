@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, type Account, type ApiError, type Site, type SiteDatabase } from '../api'
 import {
-  Alert, Card, Empty, LiveMetric, Modal, Spinner, StatusBadge, formatMB, useConfirm, useLiveStats,
+  Alert, Card, Empty, LiveMetric, Meter, Modal, Spinner, StatCard, StatusBadge,
+  formatMB, useConfirm, useLiveStats,
 } from '../components'
 import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
@@ -61,12 +62,17 @@ export default function AccountDetail() {
     <>
       {dialog}
       <div className="page-head">
-        <div>
-          <h1>{account.system_user}</h1>
-          <p>
-            {account.primary_domain} · plan {account.plan?.name ?? '—'} ·{' '}
-            <StatusBadge status={account.status} />
-          </p>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <span className="account-avatar" aria-hidden="true">
+            {account.system_user.slice(0, 2).toUpperCase()}
+          </span>
+          <div>
+            <h1>{account.system_user}</h1>
+            <p>
+              {account.primary_domain} · plan {account.plan?.name ?? '—'} ·{' '}
+              <StatusBadge status={account.status} />
+            </p>
+          </div>
         </div>
         <div className="actions">
           <button className="primary" onClick={() => setCreatingSite(true)}>
@@ -86,26 +92,29 @@ export default function AccountDetail() {
       )}
 
       <div className="stat-grid">
-        <div className="stat">
-          <div className="label"><Icon name="hard-drive" />Disco</div>
-          <div className="value">{formatMB(account.disk_used_mb)}</div>
-          <div className="hint">de {formatMB(account.plan?.disk_quota_mb ?? 0)}</div>
-        </div>
-        <div className="stat">
-          <div className="label"><Icon name="server" />Sitios</div>
-          <div className="value">{sites.length}</div>
-          <div className="hint">máximo {account.plan?.max_sites ?? '—'}</div>
-        </div>
-        <div className="stat">
-          <div className="label"><Icon name="database" />Bases de datos</div>
-          <div className="value">{databases.length}</div>
-          <div className="hint">máximo {account.plan?.max_databases ?? '—'}</div>
-        </div>
-        <div className="stat">
-          <div className="label"><Icon name="cpu" />Memoria por sitio</div>
-          <div className="value">{account.plan?.memory_limit_mb ?? 0} MB</div>
-          <div className="hint">{account.plan?.cpu_limit ?? 0} vCPU</div>
-        </div>
+        <StatCard
+          icon="hard-drive" tone="blue" label="Disco"
+          value={formatMB(account.disk_used_mb)}
+          hint={`de ${formatMB(account.plan?.disk_quota_mb ?? 0)}`}
+          used={account.disk_used_mb} max={account.plan?.disk_quota_mb ?? 0}
+        />
+        <StatCard
+          icon="server" tone="violet" label="Sitios"
+          value={sites.length}
+          hint={`máximo ${account.plan?.max_sites ?? '—'}`}
+          used={sites.length} max={account.plan?.max_sites ?? 0}
+        />
+        <StatCard
+          icon="database" tone="teal" label="Bases de datos"
+          value={databases.length}
+          hint={`máximo ${account.plan?.max_databases ?? '—'}`}
+          used={databases.length} max={account.plan?.max_databases ?? 0}
+        />
+        <StatCard
+          icon="cpu" tone="rose" label="Memoria por sitio"
+          value={`${account.plan?.memory_limit_mb ?? 0} MB`}
+          hint={`${account.plan?.cpu_limit ?? 0} vCPU`}
+        />
       </div>
 
       <div className="tabs">
@@ -130,7 +139,13 @@ export default function AccountDetail() {
                 </tr>
               </thead>
               <tbody>
-                {sites.map((s) => <SiteRow key={s.id} site={s} />)}
+                {sites.map((s) => (
+                  <SiteRow
+                    key={s.id} site={s}
+                    cpuLimit={account.plan?.cpu_limit ?? 1}
+                    memLimit={account.plan?.memory_limit_mb ?? 0}
+                  />
+                ))}
               </tbody>
             </table>
           )}
@@ -192,8 +207,9 @@ export default function AccountDetail() {
 // Fila de la tabla de sitios: cada una sondea sus propias métricas del
 // contenedor mientras está corriendo (por eso vive en su propio componente,
 // un hook de sondeo por fila en vez de uno compartido para toda la tabla).
-function SiteRow({ site }: { site: Site }) {
+function SiteRow({ site, cpuLimit, memLimit }: { site: Site; cpuLimit: number; memLimit: number }) {
   const { stats, stale } = useLiveStats(site.id, site.status === 'running')
+  const live = stats && !stale
 
   return (
     <tr>
@@ -201,15 +217,21 @@ function SiteRow({ site }: { site: Site }) {
       <td>{site.domains?.map((d) => d.fqdn).join(', ') || '—'}</td>
       <td>PHP {site.php_version}</td>
       <td>
-        {stats && !stale ? (
-          <LiveMetric icon="cpu" value={stats.cpu_percent.toFixed(1)} unit="%" title="Uso de CPU en vivo" />
+        {live ? (
+          <div className="live-cell">
+            <LiveMetric icon="cpu" value={stats.cpu_percent.toFixed(1)} unit="%" title="Uso de CPU en vivo" />
+            <Meter compact tone="blue" value={stats.cpu_percent} max={cpuLimit * 100} />
+          </div>
         ) : (
           <span className="muted">—</span>
         )}
       </td>
       <td>
-        {stats && !stale ? (
-          <LiveMetric icon="hard-drive" value={stats.memory_mb.toFixed(0)} unit="MB" title="Memoria en uso en vivo" />
+        {live ? (
+          <div className="live-cell">
+            <LiveMetric icon="hard-drive" value={stats.memory_mb.toFixed(0)} unit="MB" title="Memoria en uso en vivo" />
+            <Meter compact tone="rose" value={stats.memory_mb} max={memLimit} />
+          </div>
         ) : (
           <span className="muted">—</span>
         )}
