@@ -97,6 +97,18 @@ func (s *Store) ListFTP(ctx context.Context, accountID uuid.UUID) ([]models.FTPA
 	return out, rows.Err()
 }
 
+func (s *Store) GetFTP(ctx context.Context, id uuid.UUID) (*models.FTPAccount, error) {
+	var f models.FTPAccount
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, account_id, username, home_path, quota_mb, is_active, created_at
+		FROM ftp_accounts WHERE id=$1`, id).
+		Scan(&f.ID, &f.AccountID, &f.Username, &f.HomePath, &f.QuotaMB, &f.IsActive, &f.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &f, err
+}
+
 func (s *Store) DeleteFTP(ctx context.Context, id uuid.UUID) error {
 	ct, err := s.pool.Exec(ctx, `DELETE FROM ftp_accounts WHERE id=$1`, id)
 	if err != nil {

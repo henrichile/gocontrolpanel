@@ -44,7 +44,8 @@ Internet
 | Bitácora de auditoría de todas las acciones sensibles | ✅ |
 | Reconciliación automática del estado real de los contenedores | ✅ |
 | SPA React + TypeScript embebida en el binario | ✅ |
-| Cuentas FTP/SFTP, correo, copias de seguridad | ⏳ pendiente |
+| Acceso SFTP por cuenta (usuarios virtuales vía sftpgo, sin usuarios Unix reales) | ✅ |
+| Correo, copias de seguridad automatizadas, explorador de archivos en el panel | ⏳ pendiente |
 
 ## Puesta en marcha
 
@@ -99,7 +100,7 @@ internal/
   dockerx/            orquestación de los contenedores FrankenPHP
   httpx/              helpers de JSON y errores
   models/             tipos de dominio
-  provision/          lógica de negocio (cuentas, sitios, dominios, MySQL)
+  provision/          lógica de negocio (cuentas, sitios, dominios, MySQL, SFTP)
   store/              acceso a datos
   sysinfo/            métricas del host desde /proc
   worker/             métricas, cron, reconciliación, limpieza
@@ -163,6 +164,7 @@ Todos los endpoints cuelgan de `/api/v1` y usan `Authorization: Bearer <token>`.
 | GET | `/sites/{id}/logs?follow=true` | Registros en vivo (SSE) |
 | POST | `/sites/{id}/domains` | Añade un dominio y recarga Caddy |
 | GET/POST | `/accounts/{id}/databases` | Bases de datos MySQL de la cuenta |
+| GET/POST | `/accounts/{id}/ftp` | Accesos SFTP de la cuenta (usuario, host, puerto) |
 | GET | `/system/info` | Métricas del host (solo admin) |
 | POST | `/system/caddy/sync` | Fuerza la republicación del enrutado |
 

@@ -118,6 +118,11 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/accounts/{accountID}/databases", s.handleCreateDatabase)
 			r.Delete("/databases/{databaseID}", s.handleDeleteDatabase)
 
+			// Acceso SFTP
+			r.Get("/accounts/{accountID}/ftp", s.handleListFTP)
+			r.Post("/accounts/{accountID}/ftp", s.handleCreateFTP)
+			r.Delete("/ftp/{ftpID}", s.handleDeleteFTP)
+
 			// Cron
 			r.Get("/sites/{siteID}/cron", s.handleListCron)
 			r.Post("/sites/{siteID}/cron", s.handleCreateCron)

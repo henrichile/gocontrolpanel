@@ -278,7 +278,7 @@ comprobar_recursos() {
  
 comprobar_puertos() {
     local ocupados=()
-    for puerto in 80 443; do
+    for puerto in 80 443 2022; do
         if command -v ss >/dev/null 2>&1 && ss -Hltn "sport = :$puerto" 2>/dev/null | grep -q .; then
             ocupados+=("$puerto")
         fi
@@ -633,11 +633,17 @@ escribir_env() {
         POSTGRES_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' "$env_file" | cut -d= -f2- || true)"
         MYSQL_ROOT_PASSWORD="$(grep -E '^MYSQL_ROOT_PASSWORD=' "$env_file" | cut -d= -f2- || true)"
         JWT_SECRET="$(grep -E '^GOCP_JWT_SECRET=' "$env_file" | cut -d= -f2- || true)"
+        GOCP_SFTP_ADMIN_USER="$(grep -E '^GOCP_SFTP_ADMIN_USER=' "$env_file" | cut -d= -f2- || true)"
+        GOCP_SFTP_ADMIN_PASSWORD="$(grep -E '^GOCP_SFTP_ADMIN_PASSWORD=' "$env_file" | cut -d= -f2- || true)"
     fi
- 
+
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generar_secreto 32)}"
     MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-$(generar_secreto 32)}"
     JWT_SECRET="${JWT_SECRET:-$(openssl rand -hex 32)}"
+    # Credenciales del ADMIN de la API de sftpgo (no confundir con los
+    # usuarios SFTP de cada cuenta, que crea el panel dinámicamente).
+    GOCP_SFTP_ADMIN_USER="${GOCP_SFTP_ADMIN_USER:-gocp-admin}"
+    GOCP_SFTP_ADMIN_PASSWORD="${GOCP_SFTP_ADMIN_PASSWORD:-$(generar_secreto 32)}"
 
     # El panel corre como usuario "nonroot" dentro del contenedor y necesita
     # el GID del grupo dueño de /var/run/docker.sock para poder hablar con el
@@ -676,7 +682,12 @@ GOCP_ADMIN_PASSWORD=${GOCP_ADMIN_PASSWORD}
  
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
- 
+
+GOCP_SFTP_ADMIN_USER=${GOCP_SFTP_ADMIN_USER}
+GOCP_SFTP_ADMIN_PASSWORD=${GOCP_SFTP_ADMIN_PASSWORD}
+GOCP_SFTP_PUBLIC_HOST=${GOCP_DOMAIN}
+GOCP_SFTP_PUBLIC_PORT=2022
+
 GOCP_CADDY_EMAIL=${GOCP_EMAIL}
  
 GOCP_DOCKER_NETWORK=gocontrolpanel_sites
@@ -844,6 +855,8 @@ resumen_final() {
  
     printf '\n  %sInstalado en:%s   %s\n' "$C_BOLD" "$C_RESET" "$GOCP_INSTALL_DIR"
     printf '  %sDatos de clientes:%s %s\n' "$C_BOLD" "$C_RESET" "$GOCP_DATA_DIR"
+    printf '  %sAcceso SFTP:%s      %s:2022 (cada cuenta crea su propio usuario desde el panel)\n' \
+        "$C_BOLD" "$C_RESET" "$GOCP_DOMAIN"
     printf '  %sRegistro:%s       %s\n' "$C_BOLD" "$C_RESET" "$LOG_FILE"
  
     printf '\n  %sGestión:%s\n' "$C_BOLD" "$C_RESET"

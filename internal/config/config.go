@@ -45,6 +45,14 @@ type Config struct {
 	MySQLDSN  string
 	MySQLHost string
 
+	// SFTP gestionado (sftpgo): un usuario virtual por cuenta, con su home
+	// encadenado (chroot) a la carpeta de esa cuenta en el host.
+	SFTPAdminURL      string // API de administración de sftpgo (solo red interna)
+	SFTPAdminUser     string
+	SFTPAdminPassword string
+	SFTPPublicHost    string // host que el cliente usa para conectarse (dominio o IP)
+	SFTPPublicPort    int
+
 	// Primer administrador (solo se usa si la tabla users está vacía)
 	BootstrapAdminUser     string
 	BootstrapAdminEmail    string
@@ -80,6 +88,12 @@ func Load() (*Config, error) {
 		ContainerPrefix:  env("GOCP_CONTAINER_PREFIX", "gocp-site"),
 		MySQLDSN:         env("GOCP_MYSQL_DSN", ""),
 		MySQLHost:        env("GOCP_MYSQL_HOST", "mysql"),
+
+		SFTPAdminURL:      env("GOCP_SFTP_ADMIN_URL", "http://sftp:8080"),
+		SFTPAdminUser:     env("GOCP_SFTP_ADMIN_USER", ""),
+		SFTPAdminPassword: env("GOCP_SFTP_ADMIN_PASSWORD", ""),
+		SFTPPublicHost:    env("GOCP_SFTP_PUBLIC_HOST", ""),
+		SFTPPublicPort:    envInt("GOCP_SFTP_PUBLIC_PORT", 2022),
 
 		BootstrapAdminUser:     env("GOCP_ADMIN_USER", "admin"),
 		BootstrapAdminEmail:    env("GOCP_ADMIN_EMAIL", "admin@localhost"),

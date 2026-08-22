@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"path/filepath"
 	"strings"
 
 	"github.com/etasoft/gocontrolpanel/internal/auth"
@@ -148,6 +149,164 @@ func (s *Server) handleDeleteDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.DeleteDatabase(r.Context(), dbID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	httpx.NoContent(w)
+}
+
+// --- Acceso SFTP -------------------------------------------------------------
+//
+// El "usuario FTP" del modelo de datos hoy se sirve por SFTP (sftpgo): su
+// home queda encadenado (chroot) a la carpeta completa de la cuenta, así que
+// desde ahí se ve cada sitio bajo sites/<nombre>/<document_root> — es el
+// mecanismo para subir el código de un sitio al servidor.
+
+func (s *Server) handleListFTP(w http.ResponseWriter, r *http.Request) {
+	accountID, err := pathUUID(r, "accountID")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id de cuenta inválido")
+		return
+	}
+	id := auth.MustIdentity(r.Context())
+	if _, err := s.authorizeAccount(r.Context(), id, accountID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	accs, err := s.st.ListFTP(r.Context(), accountID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	httpx.OK(w, map[string]any{
+		"ftp_accounts": accs,
+		"host":         s.svc.SFTP().Host(),
+		"port":         s.svc.SFTP().Port(),
+	})
+}
+
+type createFTPRequest struct {
+	Name     string `json:"name"`     // sufijo opcional; vacío = usuario principal (system_user)
+	Password string `json:"password"` // opcional: si va vacío se genera
+	QuotaMB  int64  `json:"quota_mb"`
+}
+
+func (s *Server) handleCreateFTP(w http.ResponseWriter, r *http.Request) {
+	accountID, err := pathUUID(r, "accountID")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id de cuenta inválido")
+		return
+	}
+	var req createFTPRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	id := auth.MustIdentity(r.Context())
+	acct, err := s.authorizeAccount(r.Context(), id, accountID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if s.svc.SFTP() == nil {
+		httpx.Error(w, http.StatusServiceUnavailable,
+			"el panel no tiene un servidor SFTP configurado")
+		return
+	}
+
+	plan, err := s.st.GetPlan(r.Context(), acct.PlanID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	count, err := s.st.CountAccountFTP(r.Context(), accountID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if count >= plan.MaxFTPAccounts {
+		httpx.FieldError(w, "plan", "has alcanzado el límite de accesos SFTP de tu plan")
+		return
+	}
+
+	suffix := strings.ToLower(strings.TrimSpace(req.Name))
+	username := acct.SystemUser
+	if suffix != "" {
+		username = acct.SystemUser + "_" + suffix
+	}
+	homeDir := filepath.Join(s.cfg.SitesRoot, acct.SystemUser)
+
+	password := req.Password
+	if password == "" {
+		password, err = auth.RandomPassword(20)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, "no se pudo generar la contraseña")
+			return
+		}
+	}
+
+	if err := s.svc.SFTP().CreateUser(r.Context(), username, password, homeDir, req.QuotaMB); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	hash, err := auth.HashPassword(password, s.cfg.BcryptCost)
+	if err != nil {
+		_ = s.svc.SFTP().DeleteUser(r.Context(), username)
+		httpx.Error(w, http.StatusInternalServerError, "no se pudo proteger la contraseña")
+		return
+	}
+
+	record := &models.FTPAccount{
+		AccountID: accountID,
+		Username:  username,
+		HomePath:  homeDir,
+		QuotaMB:   req.QuotaMB,
+		IsActive:  true,
+	}
+	if err := s.st.CreateFTP(r.Context(), record, hash); err != nil {
+		// Revertimos la creación en sftpgo para no dejar huérfanos.
+		_ = s.svc.SFTP().DeleteUser(r.Context(), username)
+		writeStoreError(w, err)
+		return
+	}
+
+	s.st.Audit(r.Context(), models.AuditEntry{
+		ActorID: &id.UserID, ActorUsername: id.Username,
+		Action: "ftp.create", TargetType: "ftp_account", TargetID: record.ID.String(),
+		Detail: map[string]any{"username": username}, IPAddress: httpx.ClientIP(r),
+	})
+
+	// La contraseña se devuelve una única vez, aquí.
+	httpx.Created(w, map[string]any{
+		"ftp_account": record,
+		"password":    password,
+		"host":        s.svc.SFTP().Host(),
+		"port":        s.svc.SFTP().Port(),
+	})
+}
+
+func (s *Server) handleDeleteFTP(w http.ResponseWriter, r *http.Request) {
+	ftpID, err := pathUUID(r, "ftpID")
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "id de acceso SFTP inválido")
+		return
+	}
+	acc, err := s.st.GetFTP(r.Context(), ftpID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	id := auth.MustIdentity(r.Context())
+	if _, err := s.authorizeAccount(r.Context(), id, acc.AccountID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.svc.SFTP().DeleteUser(r.Context(), acc.Username); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.st.DeleteFTP(r.Context(), ftpID); err != nil {
 		writeStoreError(w, err)
 		return
 	}

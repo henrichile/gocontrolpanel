@@ -106,7 +106,15 @@ func run() error {
 	}
 	defer mysqlMgr.Close()
 
-	svc := provision.New(cfg, st, docker, caddy, mysqlMgr)
+	sftpMgr := provision.NewSFTPManager(
+		cfg.SFTPAdminURL, cfg.SFTPAdminUser, cfg.SFTPAdminPassword,
+		cfg.SFTPPublicHost, cfg.SFTPPublicPort,
+	)
+	if sftpMgr == nil {
+		slog.Warn("SFTP no configurado; el acceso por SFTP a las cuentas quedará desactivado")
+	}
+
+	svc := provision.New(cfg, st, docker, caddy, mysqlMgr, sftpMgr)
 
 	if cmd == "synccaddy" {
 		if err := svc.SyncCaddy(ctx); err != nil {

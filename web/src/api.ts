@@ -197,6 +197,16 @@ export interface SiteDatabase {
   created_at: string
 }
 
+export interface FTPAccount {
+  id: string
+  account_id: string
+  username: string
+  home_path: string
+  quota_mb: number
+  is_active: boolean
+  created_at: string
+}
+
 export interface CronJob {
   id: string
   site_id: string

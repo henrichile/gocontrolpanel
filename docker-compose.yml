@@ -69,6 +69,8 @@ services:
         condition: service_healthy
       edge:
         condition: service_started
+      sftp:
+        condition: service_started
     environment:
       GOCP_ENV: production
       GOCP_LISTEN_ADDR: ":8080"
@@ -83,6 +85,11 @@ services:
       GOCP_SITES_ROOT: /srv/gocp/accounts
       GOCP_MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:?}@tcp(mysql:3306)/
       GOCP_MYSQL_HOST: mysql
+      GOCP_SFTP_ADMIN_URL: http://sftp:8080
+      GOCP_SFTP_ADMIN_USER: ${GOCP_SFTP_ADMIN_USER:-}
+      GOCP_SFTP_ADMIN_PASSWORD: ${GOCP_SFTP_ADMIN_PASSWORD:-}
+      GOCP_SFTP_PUBLIC_HOST: ${GOCP_SFTP_PUBLIC_HOST:-}
+      GOCP_SFTP_PUBLIC_PORT: ${GOCP_SFTP_PUBLIC_PORT:-2022}
       GOCP_ADMIN_USER: ${GOCP_ADMIN_USER:-admin}
       GOCP_ADMIN_EMAIL: ${GOCP_ADMIN_EMAIL:-admin@localhost}
       GOCP_ADMIN_PASSWORD: ${GOCP_ADMIN_PASSWORD:-}
@@ -100,6 +107,38 @@ services:
       - sites
     healthcheck:
       test: ["CMD", "/usr/local/bin/gocpd", "version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # --- SFTP gestionado: acceso a archivos de cada cuenta --------------------
+  # sftpgo crea usuarios virtuales (uno por cuenta) sin tocar /etc/passwd; el
+  # panel los administra por su API interna (puerto 8080, solo red interna,
+  # nunca publicado). El puerto 2022 sí se publica: es donde el cliente FTP
+  # del usuario final (FileZilla, WinSCP, `sftp` por línea de comandos…) se
+  # conecta para subir el código de su sitio.
+  sftp:
+    image: drakkan/sftpgo:v2
+    container_name: gocp-sftp
+    restart: unless-stopped
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    environment:
+      SFTPGO_DEFAULT_ADMIN_USERNAME: ${GOCP_SFTP_ADMIN_USER:?falta el usuario admin de sftpgo; vuelve a ejecutar install.sh}
+      SFTPGO_DEFAULT_ADMIN_PASSWORD: ${GOCP_SFTP_ADMIN_PASSWORD:?falta la clave admin de sftpgo; vuelve a ejecutar install.sh}
+      SFTPGO_HTTPD__BINDINGS__0__ADDRESS: 0.0.0.0
+    ports:
+      - "2022:2022"
+    volumes:
+      - sftpgo_data:/var/lib/sftpgo
+      # Mismos home que ve el panel: los usuarios SFTP quedan encadenados
+      # (chroot) a la carpeta de su propia cuenta dentro de esta ruta.
+      - /srv/gocp/accounts:/srv/gocp/accounts:z
+    networks:
+      - sites
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -166,3 +205,4 @@ volumes:
   mysql_data:
   caddy_data:
   caddy_config:
+  sftpgo_data:

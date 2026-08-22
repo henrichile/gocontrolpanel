@@ -35,6 +35,7 @@ type Service struct {
 	docker *dockerx.Manager
 	caddy  *caddyapi.Client
 	mysql  *MySQLManager
+	sftp   *SFTPManager
 
 	// Serializa las recargas de Caddy: la Admin API acepta una config completa
 	// cada vez, así que dos escrituras concurrentes se pisarían.
@@ -42,13 +43,14 @@ type Service struct {
 }
 
 func New(cfg *config.Config, st *store.Store, dk *dockerx.Manager,
-	cd *caddyapi.Client, my *MySQLManager) *Service {
-	return &Service{cfg: cfg, st: st, docker: dk, caddy: cd, mysql: my}
+	cd *caddyapi.Client, my *MySQLManager, sf *SFTPManager) *Service {
+	return &Service{cfg: cfg, st: st, docker: dk, caddy: cd, mysql: my, sftp: sf}
 }
 
 func (s *Service) Docker() *dockerx.Manager { return s.docker }
 func (s *Service) Store() *store.Store      { return s.st }
 func (s *Service) MySQL() *MySQLManager     { return s.mysql }
+func (s *Service) SFTP() *SFTPManager       { return s.sftp }
 
 // --- Errores de validación -------------------------------------------------
 
@@ -184,6 +186,16 @@ func (s *Service) TerminateAccount(ctx context.Context, id uuid.UUID, deleteFile
 			for _, db := range dbs {
 				if err := s.mysql.DropDatabase(ctx, db.DBName, db.DBUser); err != nil {
 					slog.Warn("no se pudo eliminar la base de datos", "db", db.DBName, "error", err)
+				}
+			}
+		}
+	}
+	if s.sftp != nil {
+		ftpAccs, err := s.st.ListFTP(ctx, id)
+		if err == nil {
+			for _, f := range ftpAccs {
+				if err := s.sftp.DeleteUser(ctx, f.Username); err != nil {
+					slog.Warn("no se pudo eliminar el usuario SFTP", "username", f.Username, "error", err)
 				}
 			}
 		}

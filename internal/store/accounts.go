@@ -219,3 +219,10 @@ func (s *Store) CountAccountDatabases(ctx context.Context, accountID uuid.UUID) 
 		`SELECT count(*) FROM site_databases WHERE account_id=$1`, accountID).Scan(&n)
 	return n, err
 }
+
+func (s *Store) CountAccountFTP(ctx context.Context, accountID uuid.UUID) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx,
+		`SELECT count(*) FROM ftp_accounts WHERE account_id=$1`, accountID).Scan(&n)
+	return n, err
+}

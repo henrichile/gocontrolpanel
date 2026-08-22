@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type Account, type ApiError, type Site, type SiteDatabase } from '../api'
+import { api, type Account, type ApiError, type FTPAccount, type Site, type SiteDatabase } from '../api'
 import {
   Alert, Card, Empty, LiveMetric, Meter, Modal, Spinner, StatCard, StatusBadge,
   formatMB, useConfirm, useLiveStats,
@@ -15,10 +15,14 @@ export default function AccountDetail() {
   const [sites, setSites] = useState<Site[]>([])
   const [databases, setDatabases] = useState<SiteDatabase[]>([])
   const [dbHost, setDbHost] = useState('')
+  const [ftpAccounts, setFtpAccounts] = useState<FTPAccount[]>([])
+  const [sftpHost, setSftpHost] = useState('')
+  const [sftpPort, setSftpPort] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'sitios' | 'bases'>('sitios')
+  const [tab, setTab] = useState<'sitios' | 'bases' | 'sftp'>('sitios')
   const [creatingSite, setCreatingSite] = useState(false)
   const [creatingDB, setCreatingDB] = useState(false)
+  const [creatingFTP, setCreatingFTP] = useState(false)
   const [notice, setNotice] = useState('')
   const { confirm, dialog } = useConfirm()
 
@@ -34,6 +38,16 @@ export default function AccountDetail() {
       setDbHost(dbs.host)
     } catch {
       setDatabases([])
+    }
+    try {
+      const ftp = await api.get<{ ftp_accounts: FTPAccount[]; host: string; port: number }>(
+        `/accounts/${accountID}/ftp`,
+      )
+      setFtpAccounts(ftp.ftp_accounts)
+      setSftpHost(ftp.host)
+      setSftpPort(ftp.port)
+    } catch {
+      setFtpAccounts([])
     }
   }, [accountID])
 
@@ -52,6 +66,18 @@ export default function AccountDetail() {
       await reload()
     } catch (err) {
       toast.error(errorMessage(err, 'No se pudo eliminar la base de datos'))
+    }
+  }
+
+  async function dropFTP(f: FTPAccount) {
+    const ok = await confirm(`Se eliminará el acceso SFTP ${f.username}.`)
+    if (!ok) return
+    try {
+      await api.del(`/ftp/${f.id}`)
+      toast.success(`Acceso SFTP ${f.username} eliminado`)
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo eliminar el acceso SFTP'))
     }
   }
 
@@ -80,6 +106,9 @@ export default function AccountDetail() {
           </button>
           <button onClick={() => setCreatingDB(true)}>
             <Icon name="database" />Nueva base de datos
+          </button>
+          <button onClick={() => setCreatingFTP(true)}>
+            <Icon name="folder" />Nuevo acceso SFTP
           </button>
         </div>
       </div>
@@ -123,6 +152,9 @@ export default function AccountDetail() {
         </button>
         <button className={tab === 'bases' ? 'active' : ''} onClick={() => setTab('bases')}>
           Bases de datos
+        </button>
+        <button className={tab === 'sftp' ? 'active' : ''} onClick={() => setTab('sftp')}>
+          Acceso SFTP
         </button>
       </div>
 
@@ -181,6 +213,36 @@ export default function AccountDetail() {
         </Card>
       )}
 
+      {tab === 'sftp' && (
+        <Card>
+          {ftpAccounts.length === 0 ? (
+            <Empty text="Esta cuenta no tiene accesos SFTP. Crea uno para subir el sitio." />
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Usuario</th><th>Servidor</th><th>Ruta</th><th></th></tr>
+              </thead>
+              <tbody>
+                {ftpAccounts.map((f) => (
+                  <tr key={f.id}>
+                    <td className="strong">{f.username}</td>
+                    <td className="muted">
+                      <code className="inline">{sftpHost || '—'}:{sftpPort || 22}</code>
+                    </td>
+                    <td className="muted" style={{ wordBreak: 'break-all' }}>{f.home_path}</td>
+                    <td>
+                      <button className="sm ghost danger" onClick={() => void dropFTP(f)}>
+                        <Icon name="trash" size={14} />Eliminar
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+
       {creatingSite && (
         <CreateSiteModal
           account={account}
@@ -198,6 +260,14 @@ export default function AccountDetail() {
           account={account}
           onClose={() => setCreatingDB(false)}
           onCreated={(msg) => { setCreatingDB(false); setNotice(msg); void reload() }}
+        />
+      )}
+
+      {creatingFTP && (
+        <CreateFTPModal
+          account={account}
+          onClose={() => setCreatingFTP(false)}
+          onCreated={(msg) => { setCreatingFTP(false); setNotice(msg); void reload() }}
         />
       )}
     </>
@@ -372,6 +442,61 @@ function CreateDatabaseModal({ account, onClose, onCreated }: {
                    onChange={(e) => setName(e.target.value)} placeholder="tienda" />
           </div>
         </div>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button className="primary" disabled={busy}>{busy ? 'Creando…' : 'Crear'}</button>
+        </div>
+      </form>
+    </Modal>
+  )
+}
+
+function CreateFTPModal({ account, onClose, onCreated }: {
+  account: Account
+  onClose: () => void
+  onCreated: (message: string) => void
+}) {
+  const [name, setName] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const res = await api.post<{ password: string; ftp_account: FTPAccount; host: string; port: number }>(
+        `/accounts/${account.id}/ftp`, { name },
+      )
+      onCreated(
+        `Acceso SFTP ${res.ftp_account.username} creado en ${res.host}:${res.port}. ` +
+        `Contraseña (se muestra una sola vez): ${res.password}`,
+      )
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo crear el acceso SFTP')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Nuevo acceso SFTP" onClose={onClose}>
+      <form onSubmit={submit}>
+        {error && <Alert kind="error">{error}</Alert>}
+        <div className="field">
+          <label htmlFor="ftpname">Usuario</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <code className="inline">{account.system_user}</code>
+            <span className="muted">(dejar vacío = usuario principal)</span>
+          </div>
+          <input id="ftpname" value={name} placeholder="colaborador (opcional)"
+                 onChange={(e) => setName(e.target.value)} style={{ marginTop: 8 }} />
+        </div>
+        <p className="muted" style={{ fontSize: 12 }}>
+          El acceso llega a toda la cuenta: desde ahí se navega a cada sitio en
+          <code className="inline" style={{ margin: '0 4px' }}>sites/&lt;nombre&gt;</code>
+          para subir su código.
+        </p>
         <div className="modal-actions">
           <button type="button" onClick={onClose}>Cancelar</button>
           <button className="primary" disabled={busy}>{busy ? 'Creando…' : 'Crear'}</button>
