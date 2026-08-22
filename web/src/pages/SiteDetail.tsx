@@ -61,8 +61,9 @@ export default function SiteDetail() {
     const ok = await confirm('Se eliminará el sitio, su contenedor y sus archivos.')
     if (!ok) return
     try {
+      const accountID = site?.account_id
       await api.del(`/sites/${siteID}?delete_files=true`)
-      window.location.href = '/sitios'
+      window.location.href = accountID ? `/cuentas/${accountID}` : '/'
     } catch (err) {
       toast.error(errorMessage(err, 'No se pudo eliminar el sitio'))
     }
