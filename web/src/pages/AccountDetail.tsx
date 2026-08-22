@@ -63,7 +63,7 @@ export default function AccountDetail() {
       {dialog}
       <div className="page-head">
         <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-          <span className="account-avatar" aria-hidden="true">
+          <span className="entity-avatar" aria-hidden="true">
             {account.system_user.slice(0, 2).toUpperCase()}
           </span>
           <div>

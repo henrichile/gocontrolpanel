@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { api, tokens, type CronJob, type Site, type UsageSample } from '../api'
+import { api, tokens, type Account, type CronJob, type Site, type UsageSample } from '../api'
 import {
-  Alert, Card, Empty, Spinner, Sparkline, StatusBadge, formatDate, useConfirm,
+  Alert, Card, Empty, Meter, Spinner, Sparkline, StatusBadge,
+  formatDate, useConfirm, useLiveStats,
 } from '../components'
+import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
 
 type Tab = 'general' | 'dominios' | 'logs' | 'cron'
@@ -20,6 +22,7 @@ export default function SiteDetail() {
   const toast = useToast()
   const [site, setSite] = useState<Site | null>(null)
   const [usage, setUsage] = useState<UsageSample[]>([])
+  const [plan, setPlan] = useState<Account['plan']>(undefined)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
@@ -34,6 +37,13 @@ export default function SiteDetail() {
       setUsage(u.samples)
     } catch {
       setUsage([])
+    }
+    // Los topes de CPU/memoria viven en el plan de la cuenta, no en el sitio.
+    try {
+      const acct = await api.get<{ account: Account }>(`/accounts/${res.site.account_id}`)
+      setPlan(acct.account.plan)
+    } catch {
+      setPlan(undefined)
     }
   }, [siteID])
 
@@ -76,21 +86,34 @@ export default function SiteDetail() {
     <>
       {dialog}
       <div className="page-head">
-        <div>
-          <h1>{site.name}</h1>
-          <p>
-            <StatusBadge status={site.status} /> · PHP {site.php_version} ·{' '}
-            <code className="inline">{site.container_name}</code>
-          </p>
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+          <span className="entity-avatar" aria-hidden="true">
+            <Icon name="server" size={20} />
+          </span>
+          <div>
+            <h1>{site.name}</h1>
+            <p>
+              <StatusBadge status={site.status} /> · PHP {site.php_version} ·{' '}
+              <code className="inline">{site.container_name}</code>
+            </p>
+          </div>
         </div>
         <div className="actions">
-          <button disabled={!!busy} onClick={() => void action('start', 'arrancar')}>Arrancar</button>
-          <button disabled={!!busy} onClick={() => void action('stop', 'detener')}>Detener</button>
-          <button disabled={!!busy} onClick={() => void action('restart', 'reiniciar')}>Reiniciar</button>
-          <button disabled={!!busy} onClick={() => void action('redeploy', 'redesplegar')}>
-            Redesplegar
+          <button disabled={!!busy} onClick={() => void action('start', 'arrancar')}>
+            <Icon name="power" size={15} />Arrancar
           </button>
-          <button className="danger ghost" onClick={() => void remove()}>Eliminar</button>
+          <button disabled={!!busy} onClick={() => void action('stop', 'detener')}>
+            <Icon name="stop" size={15} />Detener
+          </button>
+          <button disabled={!!busy} onClick={() => void action('restart', 'reiniciar')}>
+            <Icon name="refresh" size={15} />Reiniciar
+          </button>
+          <button disabled={!!busy} onClick={() => void action('redeploy', 'redesplegar')}>
+            <Icon name="redeploy" size={15} />Redesplegar
+          </button>
+          <button className="danger ghost" onClick={() => void remove()}>
+            <Icon name="trash" size={15} />Eliminar
+          </button>
         </div>
       </div>
 
@@ -106,7 +129,7 @@ export default function SiteDetail() {
         ))}
       </div>
 
-      {tab === 'general' && <GeneralTab site={site} usage={usage} onSaved={reload} />}
+      {tab === 'general' && <GeneralTab site={site} usage={usage} plan={plan} onSaved={reload} />}
       {tab === 'dominios' && <DomainsTab site={site} onChanged={reload} />}
       {tab === 'logs' && <LogsTab siteID={site.id} />}
       {tab === 'cron' && <CronTab siteID={site.id} />}
@@ -114,9 +137,10 @@ export default function SiteDetail() {
   )
 }
 
-function GeneralTab({ site, usage, onSaved }: {
+function GeneralTab({ site, usage, plan, onSaved }: {
   site: Site
   usage: UsageSample[]
+  plan: Account['plan']
   onSaved: () => Promise<void>
 }) {
   const [docRoot, setDocRoot] = useState(site.document_root)
@@ -124,6 +148,7 @@ function GeneralTab({ site, usage, onSaved }: {
   const [worker, setWorker] = useState(site.worker_script)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const { stats: live, stale } = useLiveStats(site.id, site.status === 'running')
 
   async function save(redeploy: boolean) {
     setSaving(true)
@@ -146,25 +171,43 @@ function GeneralTab({ site, usage, onSaved }: {
 
   const cpu = usage.map((u) => u.cpu_percent)
   const mem = usage.map((u) => u.memory_mb)
+  const cpuLimitPct = (plan?.cpu_limit ?? 1) * 100
+  const memLimit = plan?.memory_limit_mb ?? 0
+  const isLive = !!live && !stale
+  const cpuNow = isLive ? live.cpu_percent : cpu[cpu.length - 1]
+  const memNow = isLive ? live.memory_mb : mem[mem.length - 1]
 
   return (
     <>
       <div className="stat-grid">
         <div className="stat">
-          <div className="label">CPU (24 h)</div>
-          <div className="value">{cpu.length ? `${cpu[cpu.length - 1].toFixed(1)} %` : '—'}</div>
+          <span className="stat-icon tone-blue"><Icon name="cpu" size={17} /></span>
+          <div className="value" style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            {cpuNow !== undefined ? `${cpuNow.toFixed(1)} %` : '—'}
+            {isLive && <span className="live-dot" aria-hidden="true" />}
+          </div>
+          <div className="label">CPU</div>
+          {plan && <Meter tone="blue" value={cpuNow ?? 0} max={cpuLimitPct} />}
           <Sparkline values={cpu} label="Uso de CPU" />
+          <div className="hint">últimas 24 h</div>
         </div>
         <div className="stat">
-          <div className="label">Memoria (24 h)</div>
-          <div className="value">{mem.length ? `${mem[mem.length - 1].toFixed(0)} MB` : '—'}</div>
+          <span className="stat-icon tone-rose"><Icon name="hard-drive" size={17} /></span>
+          <div className="value" style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+            {memNow !== undefined ? `${memNow.toFixed(0)} MB` : '—'}
+            {isLive && <span className="live-dot" aria-hidden="true" />}
+          </div>
+          <div className="label">Memoria</div>
+          {plan && <Meter tone="rose" value={memNow ?? 0} max={memLimit} />}
           <Sparkline values={mem} label="Uso de memoria" />
+          <div className="hint">últimas 24 h</div>
         </div>
         <div className="stat">
-          <div className="label">Ruta en el host</div>
+          <span className="stat-icon tone-teal"><Icon name="folder" size={17} /></span>
           <div className="value" style={{ fontSize: 14, wordBreak: 'break-all' }}>
             {site.host_path}
           </div>
+          <div className="label">Ruta en el host</div>
         </div>
       </div>
 
@@ -188,7 +231,7 @@ function GeneralTab({ site, usage, onSaved }: {
         <div className="actions">
           <button disabled={saving} onClick={() => void save(false)}>Guardar</button>
           <button className="primary" disabled={saving} onClick={() => void save(true)}>
-            Guardar y redesplegar
+            <Icon name="redeploy" size={15} />Guardar y redesplegar
           </button>
         </div>
       </Card>
@@ -237,7 +280,7 @@ function DomainsTab({ site, onChanged }: { site: Site; onChanged: () => Promise<
           <option value="subdomain">Subdominio</option>
           <option value="alias">Alias</option>
         </select>
-        <button className="primary">Añadir</button>
+        <button className="primary"><Icon name="plus" size={15} />Añadir</button>
       </form>
 
       {(site.domains ?? []).length === 0 ? (
@@ -250,12 +293,17 @@ function DomainsTab({ site, onChanged }: { site: Site; onChanged: () => Promise<
           <tbody>
             {site.domains?.map((d) => (
               <tr key={d.id}>
-                <td className="strong">{d.fqdn}</td>
+                <td className="strong">
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                    <Icon name="globe" size={14} style={{ color: 'var(--ink-muted)' }} />
+                    {d.fqdn}
+                  </span>
+                </td>
                 <td>{d.kind}</td>
                 <td>{d.tls_mode === 'auto' ? 'Automático (Let’s Encrypt)' : d.tls_mode}</td>
                 <td>
                   <button className="sm ghost danger" onClick={() => void remove(d.fqdn, d.id)}>
-                    Quitar
+                    <Icon name="trash" size={14} />Quitar
                   </button>
                 </td>
               </tr>
@@ -298,8 +346,10 @@ function LogsTab({ siteID }: { siteID: string }) {
     <Card
       title="Registros del contenedor"
       actions={
-        <button className="sm" onClick={() => setLive((v) => !v)}>
+        <button className={`sm ${live ? 'primary' : ''}`} onClick={() => setLive((v) => !v)}>
+          <Icon name="activity" size={14} />
           {live ? 'Detener seguimiento' : 'Seguir en vivo'}
+          {live && <span className="live-dot" aria-hidden="true" />}
         </button>
       }
     >
@@ -359,7 +409,7 @@ function CronTab({ siteID }: { siteID: string }) {
                onChange={(e) => setSchedule(e.target.value)} />
         <input placeholder="php artisan schedule:run" value={command} required
                onChange={(e) => setCommand(e.target.value)} />
-        <button className="primary">Añadir</button>
+        <button className="primary"><Icon name="plus" size={15} />Añadir</button>
       </form>
 
       {jobs.length === 0 ? (
@@ -375,10 +425,16 @@ function CronTab({ siteID }: { siteID: string }) {
                 <td className="strong"><code className="inline">{j.schedule}</code></td>
                 <td>{j.command}</td>
                 <td>{formatDate(j.last_run_at)}</td>
-                <td>{j.last_exit_code ?? '—'}</td>
+                <td>
+                  {j.last_exit_code === 0 ? (
+                    <span className="badge ok"><span className="dot" />0</span>
+                  ) : j.last_exit_code != null ? (
+                    <span className="badge err"><span className="dot" />{j.last_exit_code}</span>
+                  ) : '—'}
+                </td>
                 <td>
                   <button className="sm ghost danger" onClick={() => void remove(j.id)}>
-                    Eliminar
+                    <Icon name="trash" size={14} />Eliminar
                   </button>
                 </td>
               </tr>

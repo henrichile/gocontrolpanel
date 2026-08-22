@@ -13,10 +13,12 @@ export type IconName =
   | 'plus'
   | 'trash'
   | 'power'
+  | 'stop'
   | 'refresh'
   | 'rotate'
   | 'redeploy'
   | 'globe'
+  | 'folder'
   | 'chevron-right'
 
 const PATHS: Record<IconName, string> = {
@@ -32,11 +34,13 @@ const PATHS: Record<IconName, string> = {
   plus: 'M12 5v14M5 12h14',
   trash: 'M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v6M14 11v6',
   power: 'M12 2v8M18.4 6.6a8 8 0 1 1-12.8 0',
+  stop: 'M7 4h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z',
   refresh: 'M21 12a9 9 0 1 1-3-6.7M21 3v6h-6',
   rotate: 'M3 12a9 9 0 1 0 3-6.7M3 3v6h6',
   redeploy: 'M12 3v6l4-3-4-3ZM12 21v-6l-4 3 4 3ZM3 12h6M15 12h6',
   globe:
     'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Zm-9-9h18M12 3a13 13 0 0 1 0 18 13 13 0 0 1 0-18Z',
+  folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z',
   'chevron-right': 'm9 6 6 6-6 6',
 }
 

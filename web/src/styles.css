@@ -283,7 +283,7 @@ a:hover {
 
 /* --- Avatar de cuenta (encabezado) ------------------------------------------ */
 
-.account-avatar {
+.entity-avatar {
   width: 44px;
   height: 44px;
   border-radius: 12px;
