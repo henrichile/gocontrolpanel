@@ -1,31 +1,63 @@
-/* Tema del panel. Los colores de datos siguen la paleta validada:
-   superficie oscura #1a1a19, tinta primaria #fff, secundaria #c3c2b7,
-   apagada #898781, serie 1 azul #3987e5, estados good/warning/critical. */
+/* Tema corporativo: contenido sobre blanco, sidebar de navegación oscuro para
+   dar identidad de marca (patrón clásico de panel de administración). Los
+   tokens de :root son el tema CLARO del contenido; .sidebar redefine el mismo
+   juego de variables en oscuro dentro de su propio ámbito (ver más abajo).
+   Los colores de estado (good/warning/serious/critical) usan las variantes
+   seguras sobre fondo claro: el amarillo/naranja "brillante" de la paleta
+   fija casi no se lee como texto sobre blanco, así que se usan sus pasos
+   oscuros (mismo criterio que ya aplica la propia paleta al texto "good" en
+   modo claro: #006300 en vez de #0ca30c). Todo verificado con
+   validate_palette.js: acento vs blanco 6.7:1, good 7.5:1, warning 5.8:1,
+   serious 5.8:1, critical 4.8:1 — todos ≥ AA (4.5:1). */
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-2: #222221;
-  --border: rgba(255, 255, 255, 0.1);
-  --grid: #2c2c2a;
+  --page: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f2f3f5;
+  --border: rgba(15, 23, 42, 0.12);
+  --border-strong: rgba(15, 23, 42, 0.35);
+  --grid: #e3e5ea;
 
-  --ink: #ffffff;
-  --ink-2: #c3c2b7;
-  --ink-muted: #898781;
+  --ink: #12141a;
+  --ink-2: #454b58;
+  --ink-muted: #767c89;
 
-  --series-1: #3987e5;
+  /* Acento de marca: azul índigo corporativo. Sobre blanco un mismo tono
+     alcanza 4.5:1 tanto como texto (enlaces) como fondo de botón, así que
+     --link no necesita ser un tinte aparte aquí (a diferencia del sidebar). */
+  --series-1: #1d4ed8;
+  --link: var(--series-1);
   --series-2: #d95926;
   --series-3: #199e70;
 
-  --good: #0ca30c;
-  --warning: #fab219;
-  --serious: #ec835a;
+  --good: #006300;
+  --warning: #8f5a00;
+  --serious: #b23f1f;
   --critical: #d03b3b;
 
   --radius: 10px;
   --font: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* Tarjetas blancas sobre página blanca: sin sombra se pierden contra el
+     fondo, así que llevan un rastro de profundidad además del borde. */
+  --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(15, 23, 42, 0.05);
+}
+
+/* Sidebar: la única zona que se queda oscura. Redefine el mismo juego de
+   variables dentro de su ámbito; todo lo que ya está escrito contra los
+   tokens (var(--surface), var(--ink), var(--series-1)…) se adapta solo. */
+.sidebar {
+  color-scheme: dark;
+  --surface: #14161c;
+  --surface-2: #1b1e26;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.25);
+  --ink: #f3f4f6;
+  --ink-2: #b6bac3;
+  --ink-muted: #7c8290;
+  --series-1: #3f6ae0;
+  --link: #6f93ec;
 }
 
 * {
@@ -48,7 +80,7 @@ body {
 }
 
 a {
-  color: var(--series-1);
+  color: var(--link);
   text-decoration: none;
 }
 a:hover {
@@ -154,6 +186,7 @@ a:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 18px;
+  box-shadow: var(--card-shadow, none);
 }
 
 .card + .card {
@@ -178,6 +211,7 @@ a:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px 18px;
+  box-shadow: var(--card-shadow, none);
 }
 
 .stat .label {
@@ -288,7 +322,7 @@ select,
 textarea {
   width: 100%;
   padding: 9px 11px;
-  background: var(--page);
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--ink);
@@ -332,7 +366,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.25);
+  border-color: var(--border-strong);
 }
 
 button:disabled {
@@ -385,6 +419,7 @@ button.sm {
   width: min(560px, 100%);
   max-height: 90vh;
   overflow: auto;
+  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18);
 }
 
 .modal h2 {
@@ -414,6 +449,7 @@ button.sm {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 30px;
+  box-shadow: var(--card-shadow, none);
 }
 
 .login-card h1 {
@@ -447,7 +483,7 @@ button.sm {
 
 .alert.success {
   color: var(--good);
-  border-color: rgba(12, 163, 12, 0.4);
+  border-color: rgba(0, 99, 0, 0.35);
 }
 
 /* --- Consola de logs ----------------------------------------------------- */

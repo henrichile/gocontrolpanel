@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import AccountDetail from './pages/AccountDetail'
+import MyAccount from './pages/MyAccount'
 import Sites from './pages/Sites'
 import SiteDetail from './pages/SiteDetail'
 import Users from './pages/Users'
@@ -12,7 +13,7 @@ import Plans from './pages/Plans'
 import System from './pages/System'
 
 export default function App() {
-  const { user, loading } = useAuth()
+  const { user, loading, isClient } = useAuth()
 
   if (loading) return <Spinner text="Cargando el panel…" />
   if (!user) return <Login />
@@ -23,7 +24,10 @@ export default function App() {
       <main className="main">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/cuentas" element={<Accounts />} />
+          <Route path="/mi-cuenta" element={<MyAccount />} />
+          {/* La tabla de cuentas es una vista de administración (estilo WHM);
+              un cliente entra directo a la suya por /mi-cuenta. */}
+          <Route path="/cuentas" element={isClient ? <Navigate to="/mi-cuenta" replace /> : <Accounts />} />
           <Route path="/cuentas/:accountID" element={<AccountDetail />} />
           <Route path="/sitios" element={<Sites />} />
           <Route path="/sitios/:siteID" element={<SiteDetail />} />
@@ -38,7 +42,7 @@ export default function App() {
 }
 
 function Sidebar() {
-  const { user, logout, isAdmin, isReseller } = useAuth()
+  const { user, logout, isAdmin, isReseller, isClient } = useAuth()
 
   return (
     <aside className="sidebar">
@@ -49,8 +53,17 @@ function Sidebar() {
 
       <nav className="nav">
         <NavLink to="/" end>Resumen</NavLink>
-        <NavLink to="/cuentas">Cuentas</NavLink>
-        <NavLink to="/sitios">Sitios</NavLink>
+        {isClient ? (
+          <>
+            <NavLink to="/mi-cuenta">Mi cuenta</NavLink>
+            <NavLink to="/sitios">Mis sitios</NavLink>
+          </>
+        ) : (
+          <>
+            <NavLink to="/cuentas">Cuentas</NavLink>
+            <NavLink to="/sitios">Sitios</NavLink>
+          </>
+        )}
         {isReseller && <NavLink to="/usuarios">Usuarios</NavLink>}
         {isAdmin && <NavLink to="/planes">Planes</NavLink>}
         {isAdmin && <NavLink to="/sistema">Sistema</NavLink>}

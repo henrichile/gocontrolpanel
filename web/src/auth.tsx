@@ -9,6 +9,9 @@ interface AuthState {
   logout: () => Promise<void>
   isAdmin: boolean
   isReseller: boolean
+  // Un cliente (role=user) no administra cuentas ajenas: entra al portal
+  // simplificado, centrado en su propia cuenta de hosting (estilo cPanel).
+  isClient: boolean
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -74,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       isAdmin: user?.role === 'admin',
       isReseller: user?.role === 'admin' || user?.role === 'reseller',
+      isClient: user?.role === 'user',
     }),
     [user, loading, login, logout],
   )
