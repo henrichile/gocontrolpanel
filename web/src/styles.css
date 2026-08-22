@@ -215,10 +215,18 @@ a:hover {
 }
 
 .stat .label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: var(--ink-muted);
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.stat .label svg {
+  flex: none;
+  color: var(--series-1);
 }
 
 .stat .value {
@@ -363,6 +371,13 @@ button {
   background: var(--surface-2);
   color: var(--ink);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+button svg {
+  flex: none;
 }
 
 button:hover:not(:disabled) {
@@ -627,6 +642,51 @@ textarea:focus-visible {
 
 @media (prefers-reduced-motion: reduce) {
   .toast {
+    animation: none;
+  }
+}
+
+/* --- Métricas en vivo ------------------------------------------------------- */
+
+.live-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-metric svg {
+  color: var(--ink-muted);
+}
+
+.live-metric-value {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--good);
+  margin-left: 2px;
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
     animation: none;
   }
 }

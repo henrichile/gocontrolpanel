@@ -227,6 +227,13 @@ export interface UsageSample {
   sampled_at: string
 }
 
+export interface SiteStats {
+  cpu_percent: number
+  memory_mb: number
+  net_rx_mb: number
+  net_tx_mb: number
+}
+
 export interface AuditEntry {
   id: number
   actor_username: string

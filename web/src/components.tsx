@@ -1,7 +1,65 @@
 import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { api, type SiteStats } from './api'
+import { Icon } from './icons'
 
 // --- Piezas de interfaz reutilizables -------------------------------------
+
+// Consulta las métricas del contenedor a intervalos cortos mientras el sitio
+// está corriendo: es "vivo" en el sentido de refrescarse solo, no un stream
+// continuo — pedir un dato por segundo satura el daemon de Docker sin
+// aportar nada perceptible, así que 2 s es el punto de equilibrio.
+const LIVE_STATS_INTERVAL_MS = 2000
+
+export function useLiveStats(siteID: string, enabled: boolean) {
+  const [stats, setStats] = useState<SiteStats | null>(null)
+  const [stale, setStale] = useState(false)
+
+  useEffect(() => {
+    if (!enabled) {
+      setStats(null)
+      return
+    }
+    let cancelled = false
+    async function tick() {
+      try {
+        const res = await api.get<{ stats: SiteStats }>(`/sites/${siteID}/stats`)
+        if (!cancelled) {
+          setStats(res.stats)
+          setStale(false)
+        }
+      } catch {
+        if (!cancelled) setStale(true)
+      }
+    }
+    void tick()
+    const id = window.setInterval(() => void tick(), LIVE_STATS_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [siteID, enabled])
+
+  return { stats, stale }
+}
+
+// Indicador "en vivo": punto pulsante + valor. Se apaga solo (respeta
+// prefers-reduced-motion vía la animación definida en styles.css).
+export function LiveMetric({ icon, value, unit, title }: {
+  icon: Parameters<typeof Icon>[0]['name']
+  value: string
+  unit: string
+  title: string
+}) {
+  return (
+    <span className="live-metric" title={title}>
+      <Icon name={icon} size={14} />
+      <span className="live-metric-value">{value}</span>
+      <span className="muted">{unit}</span>
+      <span className="live-dot" aria-hidden="true" />
+    </span>
+  )
+}
 
 export function Card({ title, actions, children }: {
   title?: string

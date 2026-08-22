@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, type Account, type ApiError, type Site, type SiteDatabase } from '../api'
 import {
-  Alert, Card, Empty, Modal, Spinner, StatusBadge, formatMB, useConfirm,
+  Alert, Card, Empty, LiveMetric, Modal, Spinner, StatusBadge, formatMB, useConfirm, useLiveStats,
 } from '../components'
+import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
 
 export default function AccountDetail() {
@@ -68,8 +69,12 @@ export default function AccountDetail() {
           </p>
         </div>
         <div className="actions">
-          <button className="primary" onClick={() => setCreatingSite(true)}>Nuevo sitio</button>
-          <button onClick={() => setCreatingDB(true)}>Nueva base de datos</button>
+          <button className="primary" onClick={() => setCreatingSite(true)}>
+            <Icon name="plus" />Nuevo sitio
+          </button>
+          <button onClick={() => setCreatingDB(true)}>
+            <Icon name="database" />Nueva base de datos
+          </button>
         </div>
       </div>
 
@@ -82,22 +87,22 @@ export default function AccountDetail() {
 
       <div className="stat-grid">
         <div className="stat">
-          <div className="label">Disco</div>
+          <div className="label"><Icon name="hard-drive" />Disco</div>
           <div className="value">{formatMB(account.disk_used_mb)}</div>
           <div className="hint">de {formatMB(account.plan?.disk_quota_mb ?? 0)}</div>
         </div>
         <div className="stat">
-          <div className="label">Sitios</div>
+          <div className="label"><Icon name="server" />Sitios</div>
           <div className="value">{sites.length}</div>
           <div className="hint">máximo {account.plan?.max_sites ?? '—'}</div>
         </div>
         <div className="stat">
-          <div className="label">Bases de datos</div>
+          <div className="label"><Icon name="database" />Bases de datos</div>
           <div className="value">{databases.length}</div>
           <div className="hint">máximo {account.plan?.max_databases ?? '—'}</div>
         </div>
         <div className="stat">
-          <div className="label">Memoria por sitio</div>
+          <div className="label"><Icon name="cpu" />Memoria por sitio</div>
           <div className="value">{account.plan?.memory_limit_mb ?? 0} MB</div>
           <div className="hint">{account.plan?.cpu_limit ?? 0} vCPU</div>
         </div>
@@ -119,17 +124,13 @@ export default function AccountDetail() {
           ) : (
             <table>
               <thead>
-                <tr><th>Sitio</th><th>Dominios</th><th>PHP</th><th>Estado</th></tr>
+                <tr>
+                  <th>Sitio</th><th>Dominios</th><th>PHP</th>
+                  <th>CPU</th><th>Memoria</th><th>Estado</th>
+                </tr>
               </thead>
               <tbody>
-                {sites.map((s) => (
-                  <tr key={s.id}>
-                    <td className="strong"><Link to={`/sitios/${s.id}`}>{s.name}</Link></td>
-                    <td>{s.domains?.map((d) => d.fqdn).join(', ') || '—'}</td>
-                    <td>PHP {s.php_version}</td>
-                    <td><StatusBadge status={s.status} /></td>
-                  </tr>
-                ))}
+                {sites.map((s) => <SiteRow key={s.id} site={s} />)}
               </tbody>
             </table>
           )}
@@ -154,7 +155,7 @@ export default function AccountDetail() {
                     <td>{formatMB(d.size_mb)}</td>
                     <td>
                       <button className="sm ghost danger" onClick={() => void dropDatabase(d)}>
-                        Eliminar
+                        <Icon name="trash" size={14} />Eliminar
                       </button>
                     </td>
                   </tr>
@@ -185,6 +186,36 @@ export default function AccountDetail() {
         />
       )}
     </>
+  )
+}
+
+// Fila de la tabla de sitios: cada una sondea sus propias métricas del
+// contenedor mientras está corriendo (por eso vive en su propio componente,
+// un hook de sondeo por fila en vez de uno compartido para toda la tabla).
+function SiteRow({ site }: { site: Site }) {
+  const { stats, stale } = useLiveStats(site.id, site.status === 'running')
+
+  return (
+    <tr>
+      <td className="strong"><Link to={`/sitios/${site.id}`}>{site.name}</Link></td>
+      <td>{site.domains?.map((d) => d.fqdn).join(', ') || '—'}</td>
+      <td>PHP {site.php_version}</td>
+      <td>
+        {stats && !stale ? (
+          <LiveMetric icon="cpu" value={stats.cpu_percent.toFixed(1)} unit="%" title="Uso de CPU en vivo" />
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </td>
+      <td>
+        {stats && !stale ? (
+          <LiveMetric icon="hard-drive" value={stats.memory_mb.toFixed(0)} unit="MB" title="Memoria en uso en vivo" />
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </td>
+      <td><StatusBadge status={site.status} /></td>
+    </tr>
   )
 }
 

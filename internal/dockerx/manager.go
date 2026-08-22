@@ -277,10 +277,10 @@ func (m *Manager) Exec(ctx context.Context, name string, cmd []string) (int, str
 
 // Stats toma una muestra puntual de CPU/memoria/red del contenedor.
 type Stats struct {
-	CPUPercent float64
-	MemoryMB   float64
-	NetRxMB    float64
-	NetTxMB    float64
+	CPUPercent float64 `json:"cpu_percent"`
+	MemoryMB   float64 `json:"memory_mb"`
+	NetRxMB    float64 `json:"net_rx_mb"`
+	NetTxMB    float64 `json:"net_tx_mb"`
 }
 
 func (m *Manager) Stats(ctx context.Context, name string) (*Stats, error) {
