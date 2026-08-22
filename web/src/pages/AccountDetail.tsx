@@ -4,9 +4,11 @@ import { api, type Account, type ApiError, type Site, type SiteDatabase } from '
 import {
   Alert, Card, Empty, Modal, Spinner, StatusBadge, formatMB, useConfirm,
 } from '../components'
+import { errorMessage, useToast } from '../toast'
 
 export default function AccountDetail() {
   const { accountID } = useParams()
+  const toast = useToast()
   const [account, setAccount] = useState<Account | null>(null)
   const [sites, setSites] = useState<Site[]>([])
   const [databases, setDatabases] = useState<SiteDatabase[]>([])
@@ -34,14 +36,21 @@ export default function AccountDetail() {
   }, [accountID])
 
   useEffect(() => {
-    reload().finally(() => setLoading(false))
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudo cargar la cuenta')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload])
 
   async function dropDatabase(db: SiteDatabase) {
     const ok = await confirm(`Se eliminará la base de datos ${db.db_name} y su usuario.`)
     if (!ok) return
-    await api.del(`/databases/${db.id}`)
-    await reload()
+    try {
+      await api.del(`/databases/${db.id}`)
+      toast.success(`Base de datos ${db.db_name} eliminada`)
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo eliminar la base de datos'))
+    }
   }
 
   if (loading) return <Spinner />
@@ -160,7 +169,11 @@ export default function AccountDetail() {
         <CreateSiteModal
           account={account}
           onClose={() => setCreatingSite(false)}
-          onCreated={() => { setCreatingSite(false); void reload() }}
+          onCreated={() => {
+            setCreatingSite(false)
+            toast.success('Sitio creado')
+            void reload()
+          }}
         />
       )}
 

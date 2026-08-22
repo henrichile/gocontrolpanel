@@ -4,11 +4,20 @@ import { api, tokens, type CronJob, type Site, type UsageSample } from '../api'
 import {
   Alert, Card, Empty, Spinner, Sparkline, StatusBadge, formatDate, useConfirm,
 } from '../components'
+import { errorMessage, useToast } from '../toast'
 
 type Tab = 'general' | 'dominios' | 'logs' | 'cron'
 
+const ACTION_LABEL: Record<string, string> = {
+  start: 'Sitio arrancado',
+  stop: 'Sitio detenido',
+  restart: 'Sitio reiniciado',
+  redeploy: 'Sitio redesplegado',
+}
+
 export default function SiteDetail() {
   const { siteID } = useParams()
+  const toast = useToast()
   const [site, setSite] = useState<Site | null>(null)
   const [usage, setUsage] = useState<UsageSample[]>([])
   const [loading, setLoading] = useState(true)
@@ -29,7 +38,9 @@ export default function SiteDetail() {
   }, [siteID])
 
   useEffect(() => {
-    reload().finally(() => setLoading(false))
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudo cargar el sitio')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload])
 
   async function action(name: string, label: string) {
@@ -38,6 +49,7 @@ export default function SiteDetail() {
     try {
       await api.post(`/sites/${siteID}/${name}`)
       await reload()
+      toast.success(ACTION_LABEL[name] ?? 'Acción aplicada')
     } catch (err) {
       setError(err instanceof Error ? `No se pudo ${label}: ${err.message}` : 'Error')
     } finally {
@@ -48,8 +60,12 @@ export default function SiteDetail() {
   async function remove() {
     const ok = await confirm('Se eliminará el sitio, su contenedor y sus archivos.')
     if (!ok) return
-    await api.del(`/sites/${siteID}?delete_files=true`)
-    window.location.href = '/sitios'
+    try {
+      await api.del(`/sites/${siteID}?delete_files=true`)
+      window.location.href = '/sitios'
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo eliminar el sitio'))
+    }
   }
 
   if (loading) return <Spinner />
@@ -180,6 +196,7 @@ function GeneralTab({ site, usage, onSaved }: {
 }
 
 function DomainsTab({ site, onChanged }: { site: Site; onChanged: () => Promise<void> }) {
+  const toast = useToast()
   const [fqdn, setFqdn] = useState('')
   const [kind, setKind] = useState('addon')
   const [error, setError] = useState('')
@@ -190,15 +207,21 @@ function DomainsTab({ site, onChanged }: { site: Site; onChanged: () => Promise<
     try {
       await api.post(`/sites/${site.id}/domains`, { fqdn, kind, redirect_to: '' })
       setFqdn('')
+      toast.success(`Dominio ${fqdn} añadido`)
       await onChanged()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo añadir el dominio')
     }
   }
 
-  async function remove(id: string) {
-    await api.del(`/domains/${id}`)
-    await onChanged()
+  async function remove(fqdn: string, id: string) {
+    try {
+      await api.del(`/domains/${id}`)
+      toast.success(`Dominio ${fqdn} quitado`)
+      await onChanged()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo quitar el dominio'))
+    }
   }
 
   return (
@@ -230,7 +253,7 @@ function DomainsTab({ site, onChanged }: { site: Site; onChanged: () => Promise<
                 <td>{d.kind}</td>
                 <td>{d.tls_mode === 'auto' ? 'Automático (Let’s Encrypt)' : d.tls_mode}</td>
                 <td>
-                  <button className="sm ghost danger" onClick={() => void remove(d.id)}>
+                  <button className="sm ghost danger" onClick={() => void remove(d.fqdn, d.id)}>
                     Quitar
                   </button>
                 </td>
@@ -287,6 +310,7 @@ function LogsTab({ siteID }: { siteID: string }) {
 }
 
 function CronTab({ siteID }: { siteID: string }) {
+  const toast = useToast()
   const [jobs, setJobs] = useState<CronJob[]>([])
   const [schedule, setSchedule] = useState('*/5 * * * *')
   const [command, setCommand] = useState('')
@@ -297,7 +321,10 @@ function CronTab({ siteID }: { siteID: string }) {
     setJobs(res.cron_jobs)
   }, [siteID])
 
-  useEffect(() => { void reload() }, [reload])
+  useEffect(() => {
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudieron cargar las tareas cron')))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload])
 
   async function add(e: React.FormEvent) {
     e.preventDefault()
@@ -305,9 +332,20 @@ function CronTab({ siteID }: { siteID: string }) {
     try {
       await api.post(`/sites/${siteID}/cron`, { schedule, command })
       setCommand('')
+      toast.success('Tarea cron creada')
       await reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo crear la tarea')
+    }
+  }
+
+  async function remove(id: string) {
+    try {
+      await api.del(`/cron/${id}`)
+      toast.success('Tarea cron eliminada')
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo eliminar la tarea'))
     }
   }
 
@@ -338,8 +376,7 @@ function CronTab({ siteID }: { siteID: string }) {
                 <td>{formatDate(j.last_run_at)}</td>
                 <td>{j.last_exit_code ?? '—'}</td>
                 <td>
-                  <button className="sm ghost danger"
-                          onClick={async () => { await api.del(`/cron/${j.id}`); await reload() }}>
+                  <button className="sm ghost danger" onClick={() => void remove(j.id)}>
                     Eliminar
                   </button>
                 </td>

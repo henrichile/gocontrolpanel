@@ -226,4 +226,4 @@ INSERT INTO plans (name, description, disk_quota_mb, bandwidth_quota_mb,
                    max_sites, max_databases, max_ftp_accounts, cpu_limit,
                    memory_limit_mb, is_default)
 VALUES ('Starter', 'Plan por defecto creado durante la instalación',
-        5120, 51200, 3, 3, 3, 1.00, 512, TRUE);
+        5120, 51200, 1, 3, 3, 1.00, 512, TRUE);

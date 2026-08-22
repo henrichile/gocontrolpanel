@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // --- Piezas de interfaz reutilizables -------------------------------------
 
@@ -66,14 +66,43 @@ export function StatusBadge({ status }: { status: string }) {
   )
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), ' +
+  'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
 export function Modal({ title, onClose, children }: {
   title: string
   onClose: () => void
   children: ReactNode
 }) {
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  // Al abrir: foco en el primer campo (o botón) del modal. Al cerrar: el foco
+  // vuelve a donde estaba, para no perder el lugar si se navega con teclado.
+  useEffect(() => {
+    const trigger = document.activeElement as HTMLElement | null
+    const first = boxRef.current?.querySelector<HTMLElement>(FOCUSABLE)
+    first?.focus()
+    return () => trigger?.focus()
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') {
+        onClose()
+        return
+      }
+      if (e.key !== 'Tab' || !boxRef.current) return
+      const items = Array.from(boxRef.current.querySelectorAll<HTMLElement>(FOCUSABLE))
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -82,6 +111,7 @@ export function Modal({ title, onClose, children }: {
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <div
+        ref={boxRef}
         className="modal"
         role="dialog"
         aria-modal="true"
@@ -175,6 +205,68 @@ export function useConfirm() {
   ) : null
 
   return { confirm, dialog }
+}
+
+// Diálogo para pedir un texto corto (p. ej. el motivo de una suspensión),
+// en vez de recurrir a window.prompt() que rompe el estilo del resto de la app.
+export function useReasonPrompt() {
+  const [pending, setPending] = useState<{
+    title: string
+    label: string
+    resolve: (v: string | null) => void
+  } | null>(null)
+  const [value, setValue] = useState('')
+
+  const ask = (title: string, label: string) =>
+    new Promise<string | null>((resolve) => {
+      setValue('')
+      setPending({ title, label, resolve })
+    })
+
+  function close(result: string | null) {
+    pending?.resolve(result)
+    setPending(null)
+  }
+
+  const dialog = pending ? (
+    <Modal title={pending.title} onClose={() => close(null)}>
+      <form onSubmit={(e) => { e.preventDefault(); close(value) }}>
+        <div className="field">
+          <label htmlFor="reason-prompt">{pending.label}</label>
+          <input
+            id="reason-prompt"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="Opcional"
+          />
+        </div>
+        <div className="modal-actions">
+          <button type="button" onClick={() => close(null)}>Cancelar</button>
+          <button className="primary">Confirmar</button>
+        </div>
+      </form>
+    </Modal>
+  ) : null
+
+  return { ask, dialog }
+}
+
+// Filas de tabla en estado de carga: evita el "salto" de layout y el
+// parpadeo de un spinner de página completa en recargas cortas.
+export function SkeletonRows({ cols, rows = 4 }: { cols: number; rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r} aria-hidden="true">
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c}>
+              <div className="skeleton" style={{ height: 14, width: c === 0 ? '70%' : '50%' }} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  )
 }
 
 export function formatMB(mb: number): string {

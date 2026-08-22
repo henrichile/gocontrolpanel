@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { api, type ApiError, type User } from '../api'
 import { useAuth } from '../auth'
-import { Alert, Card, Empty, Modal, Spinner, formatDate, useConfirm } from '../components'
+import { Alert, Card, Empty, Modal, SkeletonRows, formatDate, useConfirm } from '../components'
+import { errorMessage, useToast } from '../toast'
 
 export default function Users() {
   const { isAdmin, user: me } = useAuth()
+  const toast = useToast()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
-  const [error, setError] = useState('')
+  const [filter, setFilter] = useState('')
   const { confirm, dialog } = useConfirm()
 
   async function reload() {
@@ -16,11 +18,20 @@ export default function Users() {
     setUsers(res.users)
   }
 
-  useEffect(() => { reload().finally(() => setLoading(false)) }, [])
+  useEffect(() => {
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudieron cargar los usuarios')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function toggleActive(u: User) {
-    await api.put(`/users/${u.id}`, { is_active: !u.is_active })
-    await reload()
+    try {
+      await api.put(`/users/${u.id}`, { is_active: !u.is_active })
+      toast.success(u.is_active ? `${u.username} desactivado` : `${u.username} activado`)
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo actualizar el usuario'))
+    }
   }
 
   async function remove(u: User) {
@@ -28,13 +39,17 @@ export default function Users() {
     if (!ok) return
     try {
       await api.del(`/users/${u.id}`)
+      toast.success(`Usuario ${u.username} eliminado`)
       await reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar')
+      toast.error(errorMessage(err, 'No se pudo eliminar'))
     }
   }
 
-  if (loading) return <Spinner />
+  const visible = users.filter((u) => {
+    const haystack = [u.username, u.email, u.full_name].join(' ').toLowerCase()
+    return haystack.includes(filter.toLowerCase())
+  })
 
   return (
     <>
@@ -47,11 +62,20 @@ export default function Users() {
         <button className="primary" onClick={() => setCreating(true)}>Nuevo usuario</button>
       </div>
 
-      {error && <Alert kind="error">{error}</Alert>}
-
       <Card>
-        {users.length === 0 ? (
+        {!loading && users.length > 0 && (
+          <input
+            className="table-search"
+            placeholder="Buscar por usuario, correo o nombre…"
+            aria-label="Buscar usuarios"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        )}
+        {!loading && users.length === 0 ? (
           <Empty text="No hay usuarios." />
+        ) : !loading && visible.length === 0 ? (
+          <Empty text="Ningún usuario coincide con la búsqueda." />
         ) : (
           <table>
             <thead>
@@ -61,33 +85,37 @@ export default function Users() {
               </tr>
             </thead>
             <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td className="strong">{u.username}</td>
-                  <td>{u.email}</td>
-                  <td>{roleLabel(u.role)}</td>
-                  <td>{formatDate(u.last_login_at)}</td>
-                  <td>
-                    <span className={`badge ${u.is_active ? 'ok' : 'idle'}`}>
-                      <span className="dot" />{u.is_active ? 'Activo' : 'Desactivado'}
-                    </span>
-                  </td>
-                  <td>
-                    {u.id !== me?.id && (
-                      <div className="actions">
-                        <button className="sm ghost" onClick={() => void toggleActive(u)}>
-                          {u.is_active ? 'Desactivar' : 'Activar'}
-                        </button>
-                        {isAdmin && (
-                          <button className="sm ghost danger" onClick={() => void remove(u)}>
-                            Eliminar
+              {loading ? (
+                <SkeletonRows cols={6} />
+              ) : (
+                visible.map((u) => (
+                  <tr key={u.id}>
+                    <td className="strong">{u.username}</td>
+                    <td>{u.email}</td>
+                    <td>{roleLabel(u.role)}</td>
+                    <td>{formatDate(u.last_login_at)}</td>
+                    <td>
+                      <span className={`badge ${u.is_active ? 'ok' : 'idle'}`}>
+                        <span className="dot" />{u.is_active ? 'Activo' : 'Desactivado'}
+                      </span>
+                    </td>
+                    <td>
+                      {u.id !== me?.id && (
+                        <div className="actions">
+                          <button className="sm ghost" onClick={() => void toggleActive(u)}>
+                            {u.is_active ? 'Desactivar' : 'Activar'}
                           </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                          {isAdmin && (
+                            <button className="sm ghost danger" onClick={() => void remove(u)}>
+                              Eliminar
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         )}
@@ -97,7 +125,11 @@ export default function Users() {
         <CreateUserModal
           canCreateAdmin={isAdmin}
           onClose={() => setCreating(false)}
-          onCreated={() => { setCreating(false); void reload() }}
+          onCreated={(username) => {
+            setCreating(false)
+            toast.success(`Usuario ${username} creado`)
+            void reload()
+          }}
         />
       )}
     </>
@@ -107,7 +139,7 @@ export default function Users() {
 function CreateUserModal({ canCreateAdmin, onClose, onCreated }: {
   canCreateAdmin: boolean
   onClose: () => void
-  onCreated: () => void
+  onCreated: (username: string) => void
 }) {
   const [form, setForm] = useState({
     username: '', email: '', password: '', full_name: '', role: 'user',
@@ -122,7 +154,7 @@ function CreateUserModal({ canCreateAdmin, onClose, onCreated }: {
     setError('')
     try {
       await api.post('/users', form)
-      onCreated()
+      onCreated(form.username)
     } catch (err) {
       const apiErr = err as ApiError
       setError(apiErr.message)

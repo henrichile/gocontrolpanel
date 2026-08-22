@@ -2,16 +2,22 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, type Account, type ApiError, type Plan } from '../api'
 import { useAuth } from '../auth'
-import { Alert, Card, Empty, Modal, Spinner, StatusBadge, formatMB, useConfirm } from '../components'
+import {
+  Alert, Card, Empty, Modal, SkeletonRows, StatusBadge,
+  formatMB, useConfirm, useReasonPrompt,
+} from '../components'
+import { errorMessage, useToast } from '../toast'
 
 export default function Accounts() {
   const { isReseller } = useAuth()
+  const toast = useToast()
   const [accounts, setAccounts] = useState<Account[]>([])
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
-  const [error, setError] = useState('')
-  const { confirm, dialog } = useConfirm()
+  const [filter, setFilter] = useState('')
+  const { confirm, dialog: confirmDialog } = useConfirm()
+  const { ask, dialog: promptDialog } = useReasonPrompt()
 
   async function reload() {
     const [a, p] = await Promise.all([
@@ -23,18 +29,27 @@ export default function Accounts() {
   }
 
   useEffect(() => {
-    reload().finally(() => setLoading(false))
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudieron cargar las cuentas')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function toggleSuspend(acct: Account) {
     const suspending = acct.status === 'active'
-    if (suspending) {
-      const reason = window.prompt('Motivo de la suspensión (opcional)') ?? ''
-      await api.post(`/accounts/${acct.id}/suspend`, { reason })
-    } else {
-      await api.post(`/accounts/${acct.id}/unsuspend`)
+    try {
+      if (suspending) {
+        const reason = await ask('Suspender cuenta', 'Motivo de la suspensión')
+        if (reason === null) return
+        await api.post(`/accounts/${acct.id}/suspend`, { reason })
+        toast.success(`Cuenta ${acct.system_user} suspendida`)
+      } else {
+        await api.post(`/accounts/${acct.id}/unsuspend`)
+        toast.success(`Cuenta ${acct.system_user} reactivada`)
+      }
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo actualizar el estado de la cuenta'))
     }
-    await reload()
   }
 
   async function terminate(acct: Account) {
@@ -44,17 +59,22 @@ export default function Accounts() {
     if (!ok) return
     try {
       await api.del(`/accounts/${acct.id}?delete_files=true`)
+      toast.success(`Cuenta ${acct.system_user} eliminada`)
       await reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar la cuenta')
+      toast.error(errorMessage(err, 'No se pudo eliminar la cuenta'))
     }
   }
 
-  if (loading) return <Spinner />
+  const visible = accounts.filter((a) => {
+    const haystack = [a.system_user, a.primary_domain, a.owner_login ?? ''].join(' ').toLowerCase()
+    return haystack.includes(filter.toLowerCase())
+  })
 
   return (
     <>
-      {dialog}
+      {confirmDialog}
+      {promptDialog}
       <div className="page-head">
         <div>
           <h1>Cuentas de hosting</h1>
@@ -65,11 +85,20 @@ export default function Accounts() {
         )}
       </div>
 
-      {error && <Alert kind="error">{error}</Alert>}
-
       <Card>
-        {accounts.length === 0 ? (
+        {!loading && accounts.length > 0 && (
+          <input
+            className="table-search"
+            placeholder="Buscar por usuario, dominio o propietario…"
+            aria-label="Buscar cuentas"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        )}
+        {!loading && accounts.length === 0 ? (
           <Empty text="No hay cuentas creadas todavía." />
+        ) : !loading && visible.length === 0 ? (
+          <Empty text="Ninguna cuenta coincide con la búsqueda." />
         ) : (
           <table>
             <thead>
@@ -79,30 +108,34 @@ export default function Accounts() {
               </tr>
             </thead>
             <tbody>
-              {accounts.map((a) => (
-                <tr key={a.id}>
-                  <td className="strong">
-                    <Link to={`/cuentas/${a.id}`}>{a.system_user}</Link>
-                  </td>
-                  <td>{a.primary_domain}</td>
-                  <td className="muted">{a.owner_login ?? '—'}</td>
-                  <td>{a.site_count ?? 0}</td>
-                  <td>{formatMB(a.disk_used_mb)}</td>
-                  <td><StatusBadge status={a.status} /></td>
-                  <td>
-                    {isReseller && (
-                      <div className="actions">
-                        <button className="sm ghost" onClick={() => void toggleSuspend(a)}>
-                          {a.status === 'active' ? 'Suspender' : 'Reactivar'}
-                        </button>
-                        <button className="sm ghost danger" onClick={() => void terminate(a)}>
-                          Eliminar
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {loading ? (
+                <SkeletonRows cols={7} />
+              ) : (
+                visible.map((a) => (
+                  <tr key={a.id}>
+                    <td className="strong">
+                      <Link to={`/cuentas/${a.id}`}>{a.system_user}</Link>
+                    </td>
+                    <td>{a.primary_domain}</td>
+                    <td className="muted">{a.owner_login ?? '—'}</td>
+                    <td>{a.site_count ?? 0}</td>
+                    <td>{formatMB(a.disk_used_mb)}</td>
+                    <td><StatusBadge status={a.status} /></td>
+                    <td>
+                      {isReseller && (
+                        <div className="actions">
+                          <button className="sm ghost" onClick={() => void toggleSuspend(a)}>
+                            {a.status === 'active' ? 'Suspender' : 'Reactivar'}
+                          </button>
+                          <button className="sm ghost danger" onClick={() => void terminate(a)}>
+                            Eliminar
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         )}
@@ -112,7 +145,11 @@ export default function Accounts() {
         <CreateAccountModal
           plans={plans}
           onClose={() => setCreating(false)}
-          onCreated={() => { setCreating(false); void reload() }}
+          onCreated={(name) => {
+            setCreating(false)
+            toast.success(`Cuenta ${name} creada`)
+            void reload()
+          }}
         />
       )}
     </>
@@ -122,7 +159,7 @@ export default function Accounts() {
 function CreateAccountModal({ plans, onClose, onCreated }: {
   plans: Plan[]
   onClose: () => void
-  onCreated: () => void
+  onCreated: (systemUser: string) => void
 }) {
   const [form, setForm] = useState({
     system_user: '',
@@ -142,7 +179,7 @@ function CreateAccountModal({ plans, onClose, onCreated }: {
     setFields({})
     try {
       await api.post('/accounts', form)
-      onCreated()
+      onCreated(form.system_user)
     } catch (err) {
       const apiErr = err as ApiError
       setError(apiErr.message)

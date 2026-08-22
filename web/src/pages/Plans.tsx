@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type Plan } from '../api'
-import { Alert, Card, Empty, Modal, Spinner, formatMB, useConfirm } from '../components'
+import { Alert, Card, Empty, Modal, SkeletonRows, formatMB, useConfirm } from '../components'
+import { errorMessage, useToast } from '../toast'
 
 const emptyPlan = {
   name: '',
@@ -18,11 +19,12 @@ const emptyPlan = {
 }
 
 export default function Plans() {
+  const toast = useToast()
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Plan | null>(null)
   const [creating, setCreating] = useState(false)
-  const [error, setError] = useState('')
+  const [filter, setFilter] = useState('')
   const { confirm, dialog } = useConfirm()
 
   async function reload() {
@@ -30,20 +32,25 @@ export default function Plans() {
     setPlans(res.plans)
   }
 
-  useEffect(() => { reload().finally(() => setLoading(false)) }, [])
+  useEffect(() => {
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudieron cargar los planes')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function remove(p: Plan) {
     const ok = await confirm(`¿Eliminar el plan ${p.name}? Las cuentas que lo usen lo impedirán.`)
     if (!ok) return
     try {
       await api.del(`/plans/${p.id}`)
+      toast.success(`Plan ${p.name} eliminado`)
       await reload()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar el plan')
+      toast.error(errorMessage(err, 'No se pudo eliminar el plan'))
     }
   }
 
-  if (loading) return <Spinner />
+  const visible = plans.filter((p) => p.name.toLowerCase().includes(filter.toLowerCase()))
 
   return (
     <>
@@ -56,11 +63,20 @@ export default function Plans() {
         <button className="primary" onClick={() => setCreating(true)}>Nuevo plan</button>
       </div>
 
-      {error && <Alert kind="error">{error}</Alert>}
-
       <Card>
-        {plans.length === 0 ? (
+        {!loading && plans.length > 3 && (
+          <input
+            className="table-search"
+            placeholder="Buscar plan…"
+            aria-label="Buscar planes"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+          />
+        )}
+        {!loading && plans.length === 0 ? (
           <Empty text="No hay planes definidos." />
+        ) : !loading && visible.length === 0 ? (
+          <Empty text="Ningún plan coincide con la búsqueda." />
         ) : (
           <table>
             <thead>
@@ -70,27 +86,31 @@ export default function Plans() {
               </tr>
             </thead>
             <tbody>
-              {plans.map((p) => (
-                <tr key={p.id}>
-                  <td className="strong">
-                    {p.name}{p.is_default && <span className="muted"> · por defecto</span>}
-                  </td>
-                  <td>{formatMB(p.disk_quota_mb)}</td>
-                  <td>{p.max_sites}</td>
-                  <td>{p.max_databases}</td>
-                  <td>{p.cpu_limit}</td>
-                  <td>{p.memory_limit_mb} MB</td>
-                  <td className="muted">{p.php_versions.join(', ')}</td>
-                  <td>
-                    <div className="actions">
-                      <button className="sm ghost" onClick={() => setEditing(p)}>Editar</button>
-                      <button className="sm ghost danger" onClick={() => void remove(p)}>
-                        Eliminar
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {loading ? (
+                <SkeletonRows cols={8} />
+              ) : (
+                visible.map((p) => (
+                  <tr key={p.id}>
+                    <td className="strong">
+                      {p.name}{p.is_default && <span className="muted"> · por defecto</span>}
+                    </td>
+                    <td>{formatMB(p.disk_quota_mb)}</td>
+                    <td>{p.max_sites}</td>
+                    <td>{p.max_databases}</td>
+                    <td>{p.cpu_limit}</td>
+                    <td>{p.memory_limit_mb} MB</td>
+                    <td className="muted">{p.php_versions.join(', ')}</td>
+                    <td>
+                      <div className="actions">
+                        <button className="sm ghost" onClick={() => setEditing(p)}>Editar</button>
+                        <button className="sm ghost danger" onClick={() => void remove(p)}>
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         )}
@@ -100,7 +120,11 @@ export default function Plans() {
         <PlanModal
           plan={editing}
           onClose={() => { setCreating(false); setEditing(null) }}
-          onSaved={() => { setCreating(false); setEditing(null); void reload() }}
+          onSaved={(name) => {
+            setCreating(false); setEditing(null)
+            toast.success(editing ? `Plan ${name} actualizado` : `Plan ${name} creado`)
+            void reload()
+          }}
         />
       )}
     </>
@@ -110,7 +134,7 @@ export default function Plans() {
 function PlanModal({ plan, onClose, onSaved }: {
   plan: Plan | null
   onClose: () => void
-  onSaved: () => void
+  onSaved: (name: string) => void
 }) {
   const [form, setForm] = useState({ ...emptyPlan, ...(plan ?? {}) })
   const [phpText, setPhpText] = useState((plan?.php_versions ?? emptyPlan.php_versions).join(', '))
@@ -133,7 +157,7 @@ function PlanModal({ plan, onClose, onSaved }: {
     try {
       if (plan) await api.put(`/plans/${plan.id}`, payload)
       else await api.post('/plans', payload)
-      onSaved()
+      onSaved(form.name)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo guardar el plan')
     } finally {

@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import { api, type Overview, type Site } from '../api'
 import { Card, Empty, Spinner, Stat, StatusBadge, formatMB } from '../components'
 import { useAuth } from '../auth'
+import { errorMessage, useToast } from '../toast'
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const toast = useToast()
   const [overview, setOverview] = useState<Overview | null>(null)
   const [sites, setSites] = useState<Site[]>([])
   const [loading, setLoading] = useState(true)
@@ -19,11 +21,14 @@ export default function Dashboard() {
         ])
         setOverview(ov.overview)
         setSites(list.sites)
+      } catch (err) {
+        toast.error(errorMessage(err, 'No se pudo cargar el resumen'))
       } finally {
         setLoading(false)
       }
     }
     void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (loading) return <Spinner />
