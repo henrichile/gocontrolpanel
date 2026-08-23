@@ -472,7 +472,10 @@ SSH_PORT=${ssh_port}
 ZONE="\$(firewall-cmd --get-default-zone)"
 case "\${SSH_ORIGINAL_COMMAND:-}" in
     status)
-        firewall-cmd --zone="\$ZONE" --list-ports | tr ' ' '\n' | grep -E '^[0-9]+/(tcp|udp)\$' | sed 's/\$/ allow/'
+        # El "|| true" es necesario: si no hay puertos abiertos todavía, el
+        # grep no encuentra nada y sale con estado 1 — sin esto, set -e
+        # cortaría el script entero antes de llegar al chequeo de SSH.
+        firewall-cmd --zone="\$ZONE" --list-ports | tr ' ' '\n' | grep -E '^[0-9]+/(tcp|udp)\$' | sed 's/\$/ allow/' || true
         if firewall-cmd --zone="\$ZONE" --list-services | grep -qw ssh; then
             echo "\${SSH_PORT}/tcp allow"
         fi
