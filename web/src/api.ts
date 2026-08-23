@@ -339,3 +339,12 @@ export interface SystemInfo {
   disk_free_gb: number
   uptime_secs: number
 }
+
+export interface SecurityStatus {
+  waf_enabled: boolean
+  rate_limit_per_minute: number
+  backup_retention_days: number
+  site_non_root: boolean
+  totp_enabled_admins: number
+  total_admins: number
+}

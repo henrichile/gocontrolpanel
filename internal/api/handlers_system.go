@@ -7,6 +7,7 @@ import (
 
 	"github.com/etasoft/gocontrolpanel/internal/auth"
 	"github.com/etasoft/gocontrolpanel/internal/httpx"
+	"github.com/etasoft/gocontrolpanel/internal/models"
 	"github.com/etasoft/gocontrolpanel/internal/provision"
 	"github.com/etasoft/gocontrolpanel/internal/sysinfo"
 )
@@ -52,7 +53,46 @@ func (s *Server) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	httpx.OK(w, map[string]any{
 		"system":     info,
 		"containers": len(containers),
+		"security":   s.securityStatus(r),
 	})
+}
+
+// securityStatus expone en el panel lo que hasta ahora solo vivía como
+// variables de entorno del servidor (WAF, rate limit, retención de
+// backups) o como estado de la base de datos (adopción de 2FA), para que un
+// admin no tenga que entrar por SSH a mirar el .env para saber si está
+// activo.
+type securityStatusResponse struct {
+	WAFEnabled          bool `json:"waf_enabled"`
+	RateLimitPerMinute  int  `json:"rate_limit_per_minute"`
+	BackupRetentionDays int  `json:"backup_retention_days"`
+	SiteNonRoot         bool `json:"site_non_root"`
+	TOTPEnabledAdmins   int  `json:"totp_enabled_admins"`
+	TotalAdmins         int  `json:"total_admins"`
+}
+
+func (s *Server) securityStatus(r *http.Request) securityStatusResponse {
+	resp := securityStatusResponse{
+		WAFEnabled:          s.cfg.WAFEnabled,
+		RateLimitPerMinute:  s.cfg.RateLimitPerMinute,
+		BackupRetentionDays: s.cfg.BackupRetentionDays,
+		// Los contenedores de sitio siempre corren como SiteUID desde que
+		// se agregó esto (internal/dockerx/manager.go): no depende de config.
+		SiteNonRoot: true,
+	}
+	users, err := s.st.ListUsers(r.Context(), nil)
+	if err != nil {
+		return resp
+	}
+	for _, u := range users {
+		if u.Role == models.RoleAdmin || u.Role == models.RoleReseller {
+			resp.TotalAdmins++
+			if u.TOTPEnabled {
+				resp.TOTPEnabledAdmins++
+			}
+		}
+	}
+	return resp
 }
 
 func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request) {

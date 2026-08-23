@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { api, type AuditEntry, type SystemInfo } from '../api'
+import { api, type AuditEntry, type SecurityStatus, type SystemInfo } from '../api'
 import { Alert, Card, Empty, Spinner, Stat, formatDate, formatUptime } from '../components'
 
 export default function System() {
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [containers, setContainers] = useState(0)
+  const [security, setSecurity] = useState<SecurityStatus | null>(null)
   const [audit, setAudit] = useState<AuditEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -12,12 +13,13 @@ export default function System() {
 
   useEffect(() => {
     Promise.all([
-      api.get<{ system: SystemInfo; containers: number }>('/system/info'),
+      api.get<{ system: SystemInfo; containers: number; security: SecurityStatus }>('/system/info'),
       api.get<{ entries: AuditEntry[] }>('/system/audit?limit=60'),
     ])
       .then(([sys, log]) => {
         setInfo(sys.system)
         setContainers(sys.containers)
+        setSecurity(sys.security)
         setAudit(log.entries)
       })
       .catch((err) => setError(err instanceof Error ? err.message : 'Error'))
@@ -66,6 +68,43 @@ export default function System() {
         <Stat label="Contenedores" value={containers} hint="gestionados por el panel" />
         <Stat label="Tiempo encendido" value={formatUptime(info?.uptime_secs ?? 0)} />
       </div>
+
+      <Card title="Seguridad">
+        <p className="muted" style={{ marginTop: 0 }}>
+          Esto se configura en el servidor (variables de entorno / <code className="inline">install.sh</code>),
+          no desde aquí — cambiar algo requiere editar el <code className="inline">.env</code> y reiniciar.
+        </p>
+        <div className="row">
+          <div className="field">
+            <label>WAF (Coraza + OWASP CRS)</label>
+            <span className={`badge ${security?.waf_enabled ? 'ok' : 'idle'}`}>
+              <span className="dot" />{security?.waf_enabled ? 'Activo' : 'Inactivo'}
+            </span>
+          </div>
+          <div className="field">
+            <label>Límite de peticiones por IP</label>
+            <span>{security?.rate_limit_per_minute ?? '—'} / minuto{!security?.waf_enabled && ' (sin efecto: WAF inactivo)'}</span>
+          </div>
+        </div>
+        <div className="row">
+          <div className="field">
+            <label>Retención de backups</label>
+            <span>{security?.backup_retention_days ?? '—'} días</span>
+          </div>
+          <div className="field">
+            <label>Contenedores de sitio sin privilegios</label>
+            <span className={`badge ${security?.site_non_root ? 'ok' : 'idle'}`}>
+              <span className="dot" />{security?.site_non_root ? 'Activo' : 'Inactivo'}
+            </span>
+          </div>
+        </div>
+        <div className="field">
+          <label>Verificación en dos pasos (admins/resellers)</label>
+          <span>
+            {security?.totp_enabled_admins ?? 0} de {security?.total_admins ?? 0} con 2FA activo
+          </span>
+        </div>
+      </Card>
 
       <Card title="Bitácora de auditoría">
         {audit.length === 0 ? (
