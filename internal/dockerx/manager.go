@@ -29,6 +29,14 @@ const (
 	LabelManaged = "gocp.managed"
 	LabelSiteID  = "gocp.site_id"
 	LabelAccount = "gocp.account"
+
+	// SiteUID es el UID:GID no-root con el que corren todos los contenedores
+	// de sitio — el mismo que usa el propio panel (imagen distroless
+	// "nonroot", ver el chown en docker-compose.yml). Al ser un UID numérico
+	// fijo en vez de un usuario con nombre (p.ej. "www-data"), no depende de
+	// que la imagen del sitio traiga ese usuario creado, y coincide con el
+	// dueño real de los directorios que el panel crea en el host.
+	SiteUID = "65532:65532"
 )
 
 type Manager struct {
@@ -116,6 +124,10 @@ func (m *Manager) CreateOrReplace(ctx context.Context, spec SiteSpec) (string, e
 		"SERVER_ROOT=/app/" + docRoot,
 		"FRANKENPHP_NO_COMPRESS=0",
 		"CADDY_GLOBAL_OPTIONS=auto_https off",
+		// El contenedor corre como SiteUID, un UID numérico sin usuario ni
+		// home asociado en /etc/passwd: sin esto, git/composer intentarían
+		// escribir su caché en un $HOME inexistente.
+		"HOME=/tmp",
 	}
 	if spec.WorkerScript != "" {
 		env = append(env, "FRANKENPHP_CONFIG=worker /app/"+strings.TrimLeft(spec.WorkerScript, "/"))
@@ -128,7 +140,10 @@ func (m *Manager) CreateOrReplace(ctx context.Context, spec SiteSpec) (string, e
 	}
 
 	cfg := &container.Config{
-		Image:  spec.Image,
+		Image: spec.Image,
+		// Sin privilegios: el proceso principal de FrankenPHP corre como
+		// SiteUID, no como root de la imagen upstream.
+		User:   SiteUID,
 		Env:    env,
 		Labels: map[string]string{
 			LabelManaged: "true",
@@ -164,7 +179,9 @@ func (m *Manager) CreateOrReplace(ctx context.Context, spec SiteSpec) (string, e
 	}
 	if spec.ReadOnlyRoot {
 		hostCfg.ReadonlyRootfs = true
-		hostCfg.Tmpfs = map[string]string{"/tmp": "rw,noexec,nosuid,size=64m"}
+		// mode=1777 (como el /tmp de cualquier Linux): SiteUID no es el
+		// dueño del tmpfs, necesita el bit "sticky" + escritura para todos.
+		hostCfg.Tmpfs = map[string]string{"/tmp": "rw,noexec,nosuid,mode=1777,size=64m"}
 	}
 
 	netCfg := &network.NetworkingConfig{
@@ -245,7 +262,8 @@ func (m *Manager) Logs(ctx context.Context, name string, tail int, follow bool) 
 	})
 }
 
-// Exec ejecuta un comando dentro del contenedor y devuelve salida y código.
+// Exec ejecuta un comando dentro de un contenedor de sitio (como SiteUID) y
+// devuelve salida y código.
 func (m *Manager) Exec(ctx context.Context, name string, cmd []string) (int, string, error) {
 	return m.ExecEnv(ctx, name, cmd, nil)
 }
@@ -254,12 +272,20 @@ func (m *Manager) Exec(ctx context.Context, name string, cmd []string) (int, str
 // proceso — lo usa el deploy por Git para fijar GIT_SSH_COMMAND sin tocar el
 // entorno del contenedor en sí.
 func (m *Manager) ExecEnv(ctx context.Context, name string, cmd []string, env []string) (int, string, error) {
+	return m.ExecAs(ctx, name, cmd, SiteUID, env)
+}
+
+// ExecAs es la primitiva general: permite correr como un usuario distinto de
+// SiteUID (usuario vacío = el que tenga por defecto el contenedor). La usan
+// los backups para correr mysqldump dentro del contenedor de MariaDB, que no
+// es un contenedor de sitio y no tiene por qué correr como SiteUID.
+func (m *Manager) ExecAs(ctx context.Context, name string, cmd []string, user string, env []string) (int, string, error) {
 	created, err := m.cli.ContainerExecCreate(ctx, name, container.ExecOptions{
 		Cmd:          cmd,
 		Env:          env,
 		AttachStdout: true,
 		AttachStderr: true,
-		User:         "www-data",
+		User:         user,
 	})
 	if err != nil {
 		return -1, "", err
@@ -306,6 +332,24 @@ func (m *Manager) WriteFile(ctx context.Context, name, destPath string, content 
 		return err
 	}
 	return m.cli.CopyToContainer(ctx, name, "/", &buf, container.CopyToContainerOptions{})
+}
+
+// ReadFile trae de vuelta un único archivo del contenedor como bytes
+// crudos (a diferencia de Exec/ExecAs, que capturan la salida línea por
+// línea y corromperían contenido binario como un dump comprimido). Se usa
+// para bajar el resultado de mysqldump del contenedor de MariaDB.
+func (m *Manager) ReadFile(ctx context.Context, name, srcPath string) ([]byte, error) {
+	rc, _, err := m.cli.CopyFromContainer(ctx, name, srcPath)
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+
+	tr := tar.NewReader(rc)
+	if _, err := tr.Next(); err != nil {
+		return nil, fmt.Errorf("leyendo %s del contenedor: %w", srcPath, err)
+	}
+	return io.ReadAll(tr)
 }
 
 // Stats toma una muestra puntual de CPU/memoria/red del contenedor.

@@ -29,13 +29,14 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 // --- Usuarios --------------------------------------------------------------
 
 const userCols = `id, username, email, password_hash, full_name, role, parent_id,
-                  is_active, totp_secret, last_login_at, created_at, updated_at`
+                  is_active, totp_secret, totp_enabled, totp_last_step, last_login_at,
+                  created_at, updated_at`
 
 func scanUser(row pgx.Row) (*models.User, error) {
 	var u models.User
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.FullName,
-		&u.Role, &u.ParentID, &u.IsActive, &u.TOTPSecret, &u.LastLoginAt,
-		&u.CreatedAt, &u.UpdatedAt)
+		&u.Role, &u.ParentID, &u.IsActive, &u.TOTPSecret, &u.TOTPEnabled, &u.TOTPLastStep,
+		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -114,6 +115,36 @@ func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, hash string) e
 
 func (s *Store) TouchLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `UPDATE users SET last_login_at=now() WHERE id=$1`, id)
+	return err
+}
+
+// SetTOTPSecret guarda un secreto TOTP pendiente de confirmar (totp_enabled
+// sigue en false hasta que ConfirmTOTP lo active).
+func (s *Store) SetTOTPSecret(ctx context.Context, id uuid.UUID, secret string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE users SET totp_secret=$2, totp_enabled=FALSE, totp_last_step=0, updated_at=now()
+		 WHERE id=$1`, id, secret)
+	return err
+}
+
+func (s *Store) ConfirmTOTP(ctx context.Context, id uuid.UUID, lastStep int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE users SET totp_enabled=TRUE, totp_last_step=$2, updated_at=now() WHERE id=$1`,
+		id, lastStep)
+	return err
+}
+
+// RecordTOTPStep guarda el último paso de 30s aceptado, para que ese mismo
+// código no pueda reutilizarse en un segundo intento.
+func (s *Store) RecordTOTPStep(ctx context.Context, id uuid.UUID, step int64) error {
+	_, err := s.pool.Exec(ctx, `UPDATE users SET totp_last_step=$2 WHERE id=$1`, id, step)
+	return err
+}
+
+func (s *Store) DisableTOTP(ctx context.Context, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE users SET totp_secret=NULL, totp_enabled=FALSE, totp_last_step=0, updated_at=now()
+		 WHERE id=$1`, id)
 	return err
 }
 

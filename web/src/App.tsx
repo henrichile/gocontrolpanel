@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import AccountDetail from './pages/AccountDetail'
 import MyAccount from './pages/MyAccount'
+import Profile from './pages/Profile'
 import SiteDetail from './pages/SiteDetail'
 import Users from './pages/Users'
 import Plans from './pages/Plans'
@@ -24,6 +25,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/mi-cuenta" element={<MyAccount />} />
+          <Route path="/perfil" element={<Profile />} />
           {/* La tabla de cuentas es una vista de administración (estilo WHM);
               un cliente entra directo a la suya por /mi-cuenta. */}
           <Route path="/cuentas" element={isClient ? <Navigate to="/mi-cuenta" replace /> : <Accounts />} />
@@ -70,7 +72,7 @@ function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
-        <div style={{ color: 'var(--ink-2)' }}>{user?.username}</div>
+        <NavLink to="/perfil" style={{ color: 'var(--ink-2)', display: 'block' }}>{user?.username}</NavLink>
         <div style={{ fontSize: 12, marginBottom: 10 }}>{roleLabel(user?.role)}</div>
         <button className="ghost sm" onClick={() => void logout()}>Cerrar sesión</button>
       </div>

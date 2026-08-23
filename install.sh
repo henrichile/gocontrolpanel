@@ -327,6 +327,59 @@ instalar_paquetes() {
 }
  
 # ──────────────────────────────────────────────────────────────────────────
+# 1b. Firewall (ufw) y protección SSH (fail2ban)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Idempotente: se puede volver a correr sin duplicar reglas ni jails. Solo
+# soporta distros basadas en apt (Debian/Ubuntu) — en el resto se avisa y se
+# sigue, para no bloquear la instalación por algo que el admin puede hacer a
+# mano. ufw solo se HABILITA si todavía no lo estaba: si el admin corrió el
+# instalador antes y luego ajustó las reglas a mano, no se las pisamos.
+endurecer_host() {
+    if [[ " $SO_ID $SO_FAMILIA " != *debian* && " $SO_ID $SO_FAMILIA " != *ubuntu* ]]; then
+        aviso "Firewall/fail2ban: distribución no basada en apt, sáltalo y configúralo a mano."
+        return 0
+    fi
+
+    info "Instalando ufw y fail2ban…"
+    instalar_paquetes ufw fail2ban
+
+    info "Reglas de firewall (SSH, HTTP/S, SFTP)…"
+    ejecutar ufw allow 22/tcp comment 'SSH'
+    ejecutar ufw allow 80/tcp comment 'GoControlPanel HTTP'
+    ejecutar ufw allow 443/tcp comment 'GoControlPanel HTTPS'
+    ejecutar ufw allow 443/udp comment 'GoControlPanel HTTP/3'
+    ejecutar ufw allow "${GOCP_SFTP_PUBLIC_PORT:-2022}/tcp" comment 'GoControlPanel SFTP'
+    ejecutar ufw default deny incoming
+    ejecutar ufw default allow outgoing
+
+    if [[ $DRY_RUN -eq 1 ]]; then
+        info "[simulación] ufw --force enable"
+    elif ufw status 2>/dev/null | grep -q '^Status: active'; then
+        ok "ufw ya estaba activo; reglas actualizadas sin reiniciarlo"
+    else
+        aviso "Vas a activar el firewall (ufw). El puerto 22/tcp ya quedó permitido,"
+        aviso "pero si administras este servidor por un puerto SSH distinto, ábrelo"
+        aviso "ahora mismo en otra terminal con: ufw allow <puerto>/tcp"
+        confirmar "¿Activar ufw?" && ejecutar ufw --force enable
+    fi
+
+    info "Protección SSH contra fuerza bruta (fail2ban)…"
+    if [[ $DRY_RUN -ne 1 ]]; then
+        cat > /etc/fail2ban/jail.local <<'EOF'
+[sshd]
+enabled = true
+maxretry = 5
+bantime = 1h
+findtime = 10m
+EOF
+    fi
+    ejecutar systemctl enable --now fail2ban
+
+    ok "Firewall y fail2ban configurados"
+}
+
+# ──────────────────────────────────────────────────────────────────────────
 # 2. Docker
 # ──────────────────────────────────────────────────────────────────────────
  
@@ -895,35 +948,38 @@ main() {
  
     [[ $DRY_RUN -eq 1 ]] && aviso "Modo simulación: no se modificará nada en el sistema."
  
-    paso "1/8  Comprobando el sistema"
+    paso "1/9  Comprobando el sistema"
     detectar_so
     comprobar_recursos
     comprobar_puertos
     comprobar_herramientas
- 
-    paso "2/8  Docker"
+
+    paso "2/9  Docker"
     comprobar_docker
- 
-    paso "3/8  Datos de la instalación"
+
+    paso "3/9  Datos de la instalación"
     recoger_datos
     ok "Panel: $GOCP_DOMAIN · administrador: $GOCP_ADMIN_USER"
- 
-    paso "4/8  Obteniendo el código"
+
+    paso "4/9  Obteniendo el código"
     obtener_codigo
- 
-    paso "5/8  Configuración"
+
+    paso "5/9  Configuración"
     escribir_env
     preparar_directorios
- 
-    paso "6/8  Imágenes de PHP"
+
+    paso "6/9  Imágenes de PHP"
     construir_imagenes
- 
-    paso "7/8  Arrancando la plataforma"
+
+    paso "7/9  Arrancando la plataforma"
     levantar_plataforma
     esperar_salud
     instalar_cli
- 
-    paso "8/8  Comprobaciones finales"
+
+    paso "8/9  Endureciendo el host (firewall + fail2ban)"
+    endurecer_host
+
+    paso "9/9  Comprobaciones finales"
     comprobar_dns
  
     log "===== Instalación finalizada $(date -Iseconds) ====="

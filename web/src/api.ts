@@ -164,6 +164,7 @@ export interface User {
   full_name: string
   role: Role
   is_active: boolean
+  totp_enabled: boolean
   last_login_at?: string
   created_at: string
 }
@@ -238,6 +239,12 @@ export interface SiteDatabase {
   charset: string
   size_mb: number
   created_at: string
+}
+
+export interface BackupFile {
+  name: string
+  size_b: number
+  mod_time: string
 }
 
 export interface FTPAccount {

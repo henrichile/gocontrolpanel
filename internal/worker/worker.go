@@ -30,6 +30,7 @@ func (r *Runner) Start(ctx context.Context) {
 	go r.cronLoop(ctx)
 	go r.reconcileLoop(ctx)
 	go r.housekeepingLoop(ctx)
+	go r.backupLoop(ctx)
 }
 
 // metricsLoop guarda una muestra de CPU/memoria por sitio en ejecución.
@@ -179,6 +180,40 @@ func (r *Runner) reconcileLoop(ctx context.Context) {
 				if err := r.svc.SyncCaddy(ctx); err != nil {
 					slog.Warn("reconciliación: falló la recarga de Caddy", "error", err)
 				}
+			}
+		}
+	}
+}
+
+// backupLoop respalda archivos + bases de datos de cada cuenta activa una
+// vez al día y purga los backups vencidos según GOCP_BACKUP_RETENTION_DAYS.
+func (r *Runner) backupLoop(ctx context.Context) {
+	ticker := time.NewTicker(24 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			accounts, err := r.st.ListAccounts(ctx, nil)
+			if err != nil {
+				slog.Warn("backups: no se pudieron listar las cuentas", "error", err)
+				continue
+			}
+			for _, acct := range accounts {
+				if acct.Status != models.AccountActive {
+					continue
+				}
+				runCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+				err := r.svc.RunAccountBackup(runCtx, acct.ID)
+				cancel()
+				if err != nil {
+					slog.Warn("backups: falló el respaldo de la cuenta",
+						"account", acct.SystemUser, "error", err)
+					continue
+				}
+				slog.Info("backup de cuenta completado", "account", acct.SystemUser)
 			}
 		}
 	}

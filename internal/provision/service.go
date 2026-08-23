@@ -328,6 +328,10 @@ func (s *Service) deploySite(ctx context.Context, site *models.Site,
 		WorkerCount:   site.WorkerCount,
 		CPULimit:      plan.CPULimit,
 		MemoryLimitMB: plan.MemoryLimitMB,
+		// Endurecimiento: el rootfs de la imagen queda de solo lectura; el
+		// código del sitio vive en el bind mount /app (no es parte del
+		// rootfs, sigue escribible) y /tmp es un tmpfs aparte.
+		ReadOnlyRoot: true,
 	}
 
 	containerID, err := s.docker.CreateOrReplace(ctx, spec)
@@ -522,10 +526,19 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 		}
 	}
 
+	panelUpstream := "gocp-panel" + portOf(s.cfg.ListenAddr)
 	cfg, err := caddyapi.Build(routes, caddyapi.BuildOptions{
 		ACMEEmail:     s.cfg.CaddyEmail,
 		PanelHost:     panelHost(s.cfg.PublicURL),
-		PanelUpstream: "gocp-panel" + portOf(s.cfg.ListenAddr),
+		PanelUpstream: panelUpstream,
+		// El propio panel autoriza cada emisión on-demand; sin esto, el
+		// primer /load pisa el on_demand_tls del Caddyfile inicial y los
+		// certificados de dominios nuevos dejan de emitirse.
+		OnDemandAskURL: "http://" + panelUpstream + "/api/v1/tls/authorize",
+
+		WAFEnabled:         s.cfg.WAFEnabled,
+		CorazaDirectives:   s.cfg.CorazaDirectives,
+		RateLimitPerMinute: s.cfg.RateLimitPerMinute,
 	})
 	if err != nil {
 		return err

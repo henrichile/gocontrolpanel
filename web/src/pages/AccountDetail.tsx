@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { api, type Account, type ApiError, type FTPAccount, type Site, type SiteDatabase } from '../api'
+import {
+  api, type Account, type ApiError, type BackupFile, type FTPAccount, type Site, type SiteDatabase,
+} from '../api'
 import {
   Alert, Card, Empty, LiveMetric, Meter, Modal, Spinner, StatCard, StatusBadge,
   formatMB, useConfirm, useLiveStats,
@@ -8,6 +10,13 @@ import {
 import { FileManager } from '../filemanager'
 import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
+
+function formatBytes(b: number): string {
+  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(1)} GB`
+  if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`
+  if (b >= 1024) return `${(b / 1024).toFixed(1)} KB`
+  return `${b} B`
+}
 
 export default function AccountDetail() {
   const { accountID } = useParams()
@@ -20,7 +29,9 @@ export default function AccountDetail() {
   const [sftpHost, setSftpHost] = useState('')
   const [sftpPort, setSftpPort] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'sitios' | 'archivos' | 'bases' | 'sftp'>('sitios')
+  const [tab, setTab] = useState<'sitios' | 'archivos' | 'bases' | 'sftp' | 'backups'>('sitios')
+  const [backups, setBackups] = useState<BackupFile[]>([])
+  const [backingUp, setBackingUp] = useState(false)
   const [creatingSite, setCreatingSite] = useState(false)
   const [creatingDB, setCreatingDB] = useState(false)
   const [creatingFTP, setCreatingFTP] = useState(false)
@@ -49,6 +60,12 @@ export default function AccountDetail() {
       setSftpPort(ftp.port)
     } catch {
       setFtpAccounts([])
+    }
+    try {
+      const b = await api.get<{ backups: BackupFile[] }>(`/accounts/${accountID}/backups`)
+      setBackups(b.backups)
+    } catch {
+      setBackups([])
     }
   }, [accountID])
 
@@ -79,6 +96,39 @@ export default function AccountDetail() {
       await reload()
     } catch (err) {
       toast.error(errorMessage(err, 'No se pudo eliminar el acceso SFTP'))
+    }
+  }
+
+  async function runBackup() {
+    setBackingUp(true)
+    try {
+      await api.post(`/accounts/${accountID}/backups`)
+      toast.success('Backup completado')
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo completar el backup'))
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
+  async function downloadBackup(b: BackupFile) {
+    try {
+      await api.download(`/accounts/${accountID}/backups/download?name=${encodeURIComponent(b.name)}`, b.name)
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo descargar el backup'))
+    }
+  }
+
+  async function dropBackup(b: BackupFile) {
+    const ok = await confirm(`Se eliminará el backup "${b.name}".`)
+    if (!ok) return
+    try {
+      await api.del(`/accounts/${accountID}/backups?name=${encodeURIComponent(b.name)}`)
+      toast.success('Backup eliminado')
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo eliminar el backup'))
     }
   }
 
@@ -160,6 +210,9 @@ export default function AccountDetail() {
         <button className={tab === 'sftp' ? 'active' : ''} onClick={() => setTab('sftp')}>
           Acceso SFTP
         </button>
+        <button className={tab === 'backups' ? 'active' : ''} onClick={() => setTab('backups')}>
+          Backups
+        </button>
       </div>
 
       {tab === 'sitios' && (
@@ -240,6 +293,55 @@ export default function AccountDetail() {
                       <button className="sm ghost danger" onClick={() => void dropFTP(f)}>
                         <Icon name="trash" size={14} />Eliminar
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+
+      {tab === 'backups' && (
+        <Card
+          title="Backups"
+          actions={
+            <button className="sm primary" disabled={backingUp} onClick={() => void runBackup()}>
+              <Icon name="redeploy" size={14} />{backingUp ? 'Respaldando…' : 'Respaldar ahora'}
+            </button>
+          }
+        >
+          <p className="muted" style={{ marginTop: 0 }}>
+            Incluye los archivos de todos los sitios y un dump de cada base de datos. Se genera
+            uno automáticamente cada día; los más viejos se eliminan según la retención configurada.
+          </p>
+          {backups.length === 0 ? (
+            <Empty text="Todavía no hay backups de esta cuenta." />
+          ) : (
+            <table>
+              <thead>
+                <tr><th>Archivo</th><th>Tamaño</th><th>Fecha</th><th></th></tr>
+              </thead>
+              <tbody>
+                {backups.map((b) => (
+                  <tr key={b.name}>
+                    <td className="strong">
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Icon name="archive" size={14} style={{ color: 'var(--ink-muted)' }} />
+                        {b.name}
+                      </span>
+                    </td>
+                    <td className="muted">{formatBytes(b.size_b)}</td>
+                    <td className="muted">{new Date(b.mod_time).toLocaleString('es-CL')}</td>
+                    <td>
+                      <div className="actions">
+                        <button className="sm ghost" onClick={() => void downloadBackup(b)}>
+                          <Icon name="download" size={14} />
+                        </button>
+                        <button className="sm ghost danger" onClick={() => void dropBackup(b)}>
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

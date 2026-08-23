@@ -107,6 +107,16 @@ type BuildOptions struct {
 	PanelUpstream string
 	// Página estática que se sirve cuando un sitio está detenido.
 	MaintenanceMessage string
+
+	// WAF (Coraza + OWASP CRS) y límite de tasa por IP, aplicados a las
+	// rutas de sitios de clientes (no a la del propio panel, para no
+	// arriesgar falsos positivos del WAF sobre el API del panel). Solo
+	// tiene efecto si el Caddy de borde se compiló con los plugins
+	// correspondientes (ver deploy/edge/Dockerfile) — si WAFEnabled es true
+	// mal un Caddy sin esos módulos, la carga de configuración fallará.
+	WAFEnabled         bool
+	CorazaDirectives   string // reglas de Coraza (Include .../SecRuleEngine On)
+	RateLimitPerMinute int    // 0 = usa el valor por defecto (240)
 }
 
 // Build compone la configuración completa de Caddy a partir de las rutas.
@@ -155,6 +165,21 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 		subjects = append(subjects, r.Hosts...)
 
 		var handlers []json.RawMessage
+		if opt.WAFEnabled {
+			// El WAF y el límite de tasa corren antes que cualquier otra
+			// cosa: si Coraza bloquea la petición, ni el redirect ni el
+			// reverse_proxy llegan a ejecutarse.
+			h, err := rateLimitHandler(opt.RateLimitPerMinute)
+			if err != nil {
+				return nil, err
+			}
+			handlers = append(handlers, h)
+			h, err = wafHandler(opt.CorazaDirectives)
+			if err != nil {
+				return nil, err
+			}
+			handlers = append(handlers, h)
+		}
 		switch {
 		case r.RedirectTo != "":
 			h, err := redirectHandler(r.RedirectTo)
@@ -252,6 +277,35 @@ func reverseProxyHandler(upstream string, panel bool) (json.RawMessage, error) {
 		h["flush_interval"] = -1
 	}
 	return json.Marshal(h)
+}
+
+// wafHandler arma el handler de Coraza (github.com/corazawaf/coraza-caddy),
+// el WAF equivalente a mod_security que corre sobre las reglas OWASP CRS ya
+// horneadas en la imagen del borde (ver deploy/edge/Dockerfile).
+func wafHandler(directives string) (json.RawMessage, error) {
+	return json.Marshal(map[string]any{
+		"handler":    "coraza_waf",
+		"directives": directives,
+	})
+}
+
+// rateLimitHandler arma el handler de github.com/mholt/caddy-ratelimit: un
+// límite de peticiones por IP para mitigar abuso/DDoS básico a nivel de
+// aplicación (no reemplaza protección de red contra volumetría).
+func rateLimitHandler(perMinute int) (json.RawMessage, error) {
+	if perMinute <= 0 {
+		perMinute = 240
+	}
+	return json.Marshal(map[string]any{
+		"handler": "rate_limit",
+		"rate_limits": map[string]any{
+			"edge_global": map[string]any{
+				"key":        "{http.request.remote.host}",
+				"window":     "1m",
+				"max_events": perMinute,
+			},
+		},
+	})
 }
 
 func redirectHandler(target string) (json.RawMessage, error) {

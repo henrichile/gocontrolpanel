@@ -75,6 +75,22 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// style-src necesita 'unsafe-inline' porque Monaco inyecta un
+		// <style> propio en runtime para los temas de sintaxis; script-src
+		// se mantiene estricto a 'self' (sin inline ni eval), que es lo que
+		// de verdad frena la inyección clásica de <script>.
+		h.Set("Content-Security-Policy", strings.Join([]string{
+			"default-src 'self'",
+			"script-src 'self'",
+			"style-src 'self' 'unsafe-inline'",
+			"img-src 'self' data:",
+			"font-src 'self' data:",
+			"connect-src 'self'",
+			"worker-src 'self'",
+			"frame-ancestors 'none'",
+			"base-uri 'self'",
+			"form-action 'self'",
+		}, "; "))
 		if r.TLS != nil {
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 		}

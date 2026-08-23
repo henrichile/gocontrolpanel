@@ -19,17 +19,23 @@ import (
 )
 
 type Server struct {
-	cfg    *config.Config
-	st     *store.Store
-	svc    *provision.Service
-	tokens *auth.TokenIssuer
-	caddy  *caddyapi.Client
-	webFS  fs.FS // build de la SPA, embebido en el binario
+	cfg          *config.Config
+	st           *store.Store
+	svc          *provision.Service
+	tokens       *auth.TokenIssuer
+	caddy        *caddyapi.Client
+	webFS        fs.FS // build de la SPA, embebido en el binario
+	loginLockout *rateLimiter
 }
 
 func NewServer(cfg *config.Config, st *store.Store, svc *provision.Service,
 	tokens *auth.TokenIssuer, caddy *caddyapi.Client, webFS fs.FS) *Server {
-	return &Server{cfg: cfg, st: st, svc: svc, tokens: tokens, caddy: caddy, webFS: webFS}
+	return &Server{
+		cfg: cfg, st: st, svc: svc, tokens: tokens, caddy: caddy, webFS: webFS,
+		// Bloqueo por cuenta (no por IP): 6 intentos cada 15 minutos, sea
+		// login con contraseña o verificación del código TOTP.
+		loginLockout: newRateLimiter(6, 15*time.Minute),
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -49,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 			r.Use(newRateLimiter(20, time.Minute).middleware)
 			r.Post("/auth/login", s.handleLogin)
 			r.Post("/auth/refresh", s.handleRefresh)
+			r.Post("/auth/totp/verify", s.handleTOTPVerify)
 		})
 		r.Get("/health", s.handleHealth)
 		// Endpoint que consulta Caddy antes de emitir un certificado on-demand.
@@ -67,6 +74,9 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/auth/logout", s.handleLogout)
 			r.Get("/auth/me", s.handleMe)
 			r.Post("/auth/password", s.handleChangeOwnPassword)
+			r.Post("/auth/2fa/setup", s.handleTOTPSetup)
+			r.Post("/auth/2fa/confirm", s.handleTOTPConfirm)
+			r.Post("/auth/2fa/disable", s.handleTOTPDisable)
 
 			r.Get("/overview", s.handleOverview)
 
@@ -134,6 +144,12 @@ func (s *Server) Handler() http.Handler {
 			r.Get("/accounts/{accountID}/ftp", s.handleListFTP)
 			r.Post("/accounts/{accountID}/ftp", s.handleCreateFTP)
 			r.Delete("/ftp/{ftpID}", s.handleDeleteFTP)
+
+			// Backups (archivos + bases de datos) por cuenta
+			r.Get("/accounts/{accountID}/backups", s.handleListBackups)
+			r.Post("/accounts/{accountID}/backups", s.handleCreateBackup)
+			r.Get("/accounts/{accountID}/backups/download", s.handleDownloadBackup)
+			r.Delete("/accounts/{accountID}/backups", s.handleDeleteBackup)
 
 			// Explorador de archivos (misma raíz que ve el acceso SFTP)
 			r.Get("/accounts/{accountID}/files", s.handleListFiles)

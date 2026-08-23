@@ -5,7 +5,10 @@ import { api, tokens, type User } from './api'
 interface AuthState {
   user: User | null
   loading: boolean
-  login: (login: string, password: string) => Promise<void>
+  // Si la cuenta tiene 2FA activo, la promesa resuelve con el ticket a
+  // pasarle a verifyTOTP en vez de dejar la sesión iniciada.
+  login: (login: string, password: string) => Promise<{ totpTicket: string | null }>
+  verifyTOTP: (ticket: string, code: string) => Promise<void>
   logout: () => Promise<void>
   isAdmin: boolean
   isReseller: boolean
@@ -51,9 +54,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = useCallback(async (loginValue: string, password: string) => {
+    const res = await api.post<{
+      totp_required?: boolean; ticket?: string
+      access_token?: string; refresh_token?: string; user?: User
+    }>('/auth/login', { login: loginValue, password })
+    if (res.totp_required) {
+      return { totpTicket: res.ticket ?? null }
+    }
+    tokens.set(res.access_token!, res.refresh_token!)
+    setUser(res.user!)
+    return { totpTicket: null }
+  }, [])
+
+  const verifyTOTP = useCallback(async (ticket: string, code: string) => {
     const res = await api.post<{ access_token: string; refresh_token: string; user: User }>(
-      '/auth/login',
-      { login: loginValue, password },
+      '/auth/totp/verify',
+      { ticket, code },
     )
     tokens.set(res.access_token, res.refresh_token)
     setUser(res.user)
@@ -74,12 +90,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       loading,
       login,
+      verifyTOTP,
       logout,
       isAdmin: user?.role === 'admin',
       isReseller: user?.role === 'admin' || user?.role === 'reseller',
       isClient: user?.role === 'user',
     }),
-    [user, loading, login, logout],
+    [user, loading, login, verifyTOTP, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

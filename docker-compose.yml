@@ -28,7 +28,10 @@ services:
 
   # --- Caddy de borde: TLS y reverse proxy hacia los sitios ----------------
   edge:
-    image: caddy:2-alpine
+    # Imagen propia: Caddy compilado con el WAF (Coraza + OWASP CRS) y el
+    # rate limiter. Si GOCP_WAF_ENABLED=false (el default), el panel nunca
+    # manda esos handlers y esta imagen se comporta igual que caddy:2-alpine.
+    build: deploy/edge
     container_name: gocp-edge
     restart: unless-stopped
     ports:
@@ -79,6 +82,10 @@ services:
       GOCP_JWT_SECRET: "${GOCP_JWT_SECRET:?genera uno con: openssl rand -hex 32}"
       GOCP_CADDY_ADMIN_URL: http://edge:2019
       GOCP_CADDY_EMAIL: ${GOCP_CADDY_EMAIL:-}
+      GOCP_WAF_ENABLED: ${GOCP_WAF_ENABLED:-false}
+      GOCP_RATE_LIMIT_PER_MINUTE: ${GOCP_RATE_LIMIT_PER_MINUTE:-240}
+      GOCP_MYSQL_CONTAINER_NAME: gocp-mysql
+      GOCP_BACKUP_RETENTION_DAYS: ${GOCP_BACKUP_RETENTION_DAYS:-14}
       GOCP_DOCKER_HOST: unix:///var/run/docker.sock
       GOCP_DOCKER_NETWORK: gocontrolpanel_sites
       GOCP_SITE_IMAGE_PREFIX: gocp/frankenphp

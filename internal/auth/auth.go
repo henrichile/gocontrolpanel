@@ -59,10 +59,14 @@ func RandomPassword(n int) (string, error) {
 
 // --- Tokens ----------------------------------------------------------------
 
+// Purpose distingue un access token normal (vacío, o "access") de un ticket
+// intermedio de 2FA ("totp") — así un ticket pendiente de verificar el
+// código nunca puede colarse como sesión válida en requireAuth.
 type Claims struct {
 	UserID   uuid.UUID   `json:"uid"`
 	Username string      `json:"usr"`
 	Role     models.Role `json:"rol"`
+	Purpose  string      `json:"pur,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -104,6 +108,53 @@ func (t *TokenIssuer) IssueAccess(u *models.User) (string, error) {
 }
 
 func (t *TokenIssuer) Parse(tokenStr string) (*Claims, error) {
+	claims, err := t.parseClaims(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	// Un ticket de 2FA pendiente ("totp") nunca debe servir como token de
+	// acceso normal, aunque esté firmado correctamente y no haya expirado.
+	if claims.Purpose != "" && claims.Purpose != "access" {
+		return nil, ErrInvalidToken
+	}
+	return claims, nil
+}
+
+// totpTicketTTL es deliberadamente corto: el ticket solo vive lo que tarda
+// el usuario en escribir el código de su app de autenticación.
+const totpTicketTTL = 5 * time.Minute
+
+// IssueTOTPTicket emite un token intermedio tras validar usuario+contraseña,
+// pendiente de que el cliente confirme el código TOTP.
+func (t *TokenIssuer) IssueTOTPTicket(u *models.User) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID: u.ID, Username: u.Username, Role: u.Role, Purpose: "totp",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   u.ID.String(),
+			Issuer:    t.issuer,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(totpTicketTTL)),
+			ID:        uuid.NewString(),
+		},
+	}
+	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(t.secret)
+}
+
+// ParseTOTPTicket valida un ticket emitido por IssueTOTPTicket; rechaza
+// cualquier otro tipo de token, incluido un access token normal.
+func (t *TokenIssuer) ParseTOTPTicket(tokenStr string) (*Claims, error) {
+	claims, err := t.parseClaims(tokenStr)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Purpose != "totp" {
+		return nil, ErrInvalidToken
+	}
+	return claims, nil
+}
+
+func (t *TokenIssuer) parseClaims(tokenStr string) (*Claims, error) {
 	tok, err := jwt.ParseWithClaims(tokenStr, &Claims{},
 		func(tk *jwt.Token) (any, error) {
 			if _, ok := tk.Method.(*jwt.SigningMethodHMAC); !ok {
