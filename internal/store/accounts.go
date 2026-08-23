@@ -13,14 +13,14 @@ import (
 // --- Planes ----------------------------------------------------------------
 
 const planCols = `id, name, description, disk_quota_mb, bandwidth_quota_mb,
-                  max_sites, max_databases, max_ftp_accounts, max_cron_jobs,
+                  max_sites, max_databases, max_ftp_accounts, max_cron_jobs, max_domains,
                   cpu_limit, memory_limit_mb, php_versions, is_default,
                   created_at, updated_at`
 
 func scanPlan(row pgx.Row) (*models.Plan, error) {
 	var p models.Plan
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.DiskQuotaMB, &p.BandwidthQuotaMB,
-		&p.MaxSites, &p.MaxDatabases, &p.MaxFTPAccounts, &p.MaxCronJobs,
+		&p.MaxSites, &p.MaxDatabases, &p.MaxFTPAccounts, &p.MaxCronJobs, &p.MaxDomains,
 		&p.CPULimit, &p.MemoryLimitMB, &p.PHPVersions, &p.IsDefault,
 		&p.CreatedAt, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -59,12 +59,12 @@ func (s *Store) GetDefaultPlan(ctx context.Context) (*models.Plan, error) {
 func (s *Store) CreatePlan(ctx context.Context, p *models.Plan) error {
 	return s.pool.QueryRow(ctx, `
 		INSERT INTO plans (name, description, disk_quota_mb, bandwidth_quota_mb,
-			max_sites, max_databases, max_ftp_accounts, max_cron_jobs,
+			max_sites, max_databases, max_ftp_accounts, max_cron_jobs, max_domains,
 			cpu_limit, memory_limit_mb, php_versions, is_default)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 		RETURNING id, created_at, updated_at`,
 		p.Name, p.Description, p.DiskQuotaMB, p.BandwidthQuotaMB, p.MaxSites,
-		p.MaxDatabases, p.MaxFTPAccounts, p.MaxCronJobs, p.CPULimit,
+		p.MaxDatabases, p.MaxFTPAccounts, p.MaxCronJobs, p.MaxDomains, p.CPULimit,
 		p.MemoryLimitMB, p.PHPVersions, p.IsDefault,
 	).Scan(&p.ID, &p.CreatedAt, &p.UpdatedAt)
 }
@@ -72,12 +72,12 @@ func (s *Store) CreatePlan(ctx context.Context, p *models.Plan) error {
 func (s *Store) UpdatePlan(ctx context.Context, p *models.Plan) error {
 	ct, err := s.pool.Exec(ctx, `
 		UPDATE plans SET name=$2, description=$3, disk_quota_mb=$4, bandwidth_quota_mb=$5,
-			max_sites=$6, max_databases=$7, max_ftp_accounts=$8, max_cron_jobs=$9,
-			cpu_limit=$10, memory_limit_mb=$11, php_versions=$12, is_default=$13,
+			max_sites=$6, max_databases=$7, max_ftp_accounts=$8, max_cron_jobs=$9, max_domains=$10,
+			cpu_limit=$11, memory_limit_mb=$12, php_versions=$13, is_default=$14,
 			updated_at=now()
 		WHERE id=$1`,
 		p.ID, p.Name, p.Description, p.DiskQuotaMB, p.BandwidthQuotaMB, p.MaxSites,
-		p.MaxDatabases, p.MaxFTPAccounts, p.MaxCronJobs, p.CPULimit,
+		p.MaxDatabases, p.MaxFTPAccounts, p.MaxCronJobs, p.MaxDomains, p.CPULimit,
 		p.MemoryLimitMB, p.PHPVersions, p.IsDefault)
 	if err != nil {
 		return err
@@ -224,5 +224,17 @@ func (s *Store) CountAccountFTP(ctx context.Context, accountID uuid.UUID) (int, 
 	var n int
 	err := s.pool.QueryRow(ctx,
 		`SELECT count(*) FROM ftp_accounts WHERE account_id=$1`, accountID).Scan(&n)
+	return n, err
+}
+
+// CountAccountDomains cuenta los dominios de todos los sitios de la cuenta
+// (un dominio pertenece a un sitio, no directamente a la cuenta), para
+// validar la cuota max_domains del plan.
+func (s *Store) CountAccountDomains(ctx context.Context, accountID uuid.UUID) (int, error) {
+	var n int
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*) FROM domains d
+		JOIN sites s ON s.id = d.site_id
+		WHERE s.account_id=$1`, accountID).Scan(&n)
 	return n, err
 }

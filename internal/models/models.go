@@ -43,6 +43,7 @@ type Plan struct {
 	MaxDatabases     int       `json:"max_databases"`
 	MaxFTPAccounts   int       `json:"max_ftp_accounts"`
 	MaxCronJobs      int       `json:"max_cron_jobs"`
+	MaxDomains       int       `json:"max_domains"`
 	CPULimit         float64   `json:"cpu_limit"`
 	MemoryLimitMB    int64     `json:"memory_limit_mb"`
 	PHPVersions      []string  `json:"php_versions"`

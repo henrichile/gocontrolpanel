@@ -179,6 +179,7 @@ export interface Plan {
   max_databases: number
   max_ftp_accounts: number
   max_cron_jobs: number
+  max_domains: number
   cpu_limit: number
   memory_limit_mb: number
   php_versions: string[]

@@ -598,6 +598,28 @@ func (s *Service) AddDomain(ctx context.Context, siteID uuid.UUID, fqdn string,
 	if kind == "" {
 		kind = models.DomainAddon
 	}
+
+	site, err := s.st.GetSite(ctx, siteID)
+	if err != nil {
+		return nil, err
+	}
+	acct, err := s.st.GetAccount(ctx, site.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := s.st.GetPlan(ctx, acct.PlanID)
+	if err != nil {
+		return nil, err
+	}
+	count, err := s.st.CountAccountDomains(ctx, acct.ID)
+	if err != nil {
+		return nil, err
+	}
+	if count >= plan.MaxDomains {
+		return nil, ValidationError{"plan",
+			fmt.Sprintf("el plan %s permite un máximo de %d dominios", plan.Name, plan.MaxDomains)}
+	}
+
 	d := &models.Domain{
 		SiteID:     siteID,
 		FQDN:       fqdn,
