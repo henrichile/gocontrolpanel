@@ -93,6 +93,14 @@ func (s *Server) handleTLSAuthorize(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "falta el parámetro domain")
 		return
 	}
+	// Defensa en profundidad: el dominio del propio panel ya debería estar
+	// cubierto por la política ACME explícita en caddyapi.Build (no por el
+	// catch-all on-demand), pero si por lo que sea Caddy igual pregunta acá,
+	// no queremos que el panel se rechace a sí mismo y se quede sin cert.
+	if domain == provision.PanelHost(s.cfg.PublicURL) {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	routes, err := s.st.RoutingTable(r.Context())
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "error consultando dominios")

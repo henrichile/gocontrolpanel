@@ -157,7 +157,14 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 		return strings.Join(sorted[i].Hosts, ",") < strings.Join(sorted[j].Hosts, ",")
 	})
 
+	// El dominio del propio panel va en la lista de "subjects" con ACME
+	// normal, NO en el catch-all on-demand: ese catch-all consulta
+	// /tls/authorize, que solo conoce dominios de sitios de clientes —
+	// el panel se rechazaría a sí mismo y se quedaría sin certificado.
 	subjects := []string{}
+	if opt.PanelHost != "" {
+		subjects = append(subjects, opt.PanelHost)
+	}
 	for _, r := range sorted {
 		if len(r.Hosts) == 0 {
 			continue

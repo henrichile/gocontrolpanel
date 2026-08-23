@@ -529,7 +529,7 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 	panelUpstream := "gocp-panel" + portOf(s.cfg.ListenAddr)
 	cfg, err := caddyapi.Build(routes, caddyapi.BuildOptions{
 		ACMEEmail:     s.cfg.CaddyEmail,
-		PanelHost:     panelHost(s.cfg.PublicURL),
+		PanelHost:     PanelHost(s.cfg.PublicURL),
 		PanelUpstream: panelUpstream,
 		// El propio panel autoriza cada emisión on-demand; sin esto, el
 		// primer /load pisa el on_demand_tls del Caddyfile inicial y los
@@ -656,7 +656,10 @@ func containsStr(list []string, v string) bool {
 	return false
 }
 
-func panelHost(publicURL string) string {
+// PanelHost extrae el host (sin esquema ni puerto) de la URL pública del
+// panel — exportada porque también la usa handleTLSAuthorize para
+// reconocerse a sí mismo en la autorización on-demand de TLS.
+func PanelHost(publicURL string) string {
 	u := strings.TrimPrefix(strings.TrimPrefix(publicURL, "https://"), "http://")
 	u = strings.SplitN(u, "/", 2)[0]
 	if h, _, ok := strings.Cut(u, ":"); ok {

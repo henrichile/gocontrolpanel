@@ -28,10 +28,13 @@ services:
 
   # --- Caddy de borde: TLS y reverse proxy hacia los sitios ----------------
   edge:
-    # Imagen propia: Caddy compilado con el WAF (Coraza + OWASP CRS) y el
-    # rate limiter. Si GOCP_WAF_ENABLED=false (el default), el panel nunca
-    # manda esos handlers y esta imagen se comporta igual que caddy:2-alpine.
-    build: deploy/edge
+    image: caddy:2-alpine
+    # Para activar el WAF (Coraza + OWASP CRS) hay que compilar Caddy con
+    # xcaddy: cambia la línea de arriba por "build: deploy/edge", corre
+    # `docker compose build edge` a mano y confirma que arranca bien ANTES
+    # de poner GOCP_WAF_ENABLED=true — ese build es pesado (descarga xcaddy
+    # + el ruleset de OWASP) y no debe ser parte del "docker compose up"
+    # normal de cada actualización.
     container_name: gocp-edge
     restart: unless-stopped
     ports:
