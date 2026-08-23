@@ -50,6 +50,9 @@ type Config struct {
 	HostctlHostPubkey string // clave pública del host, para fijar la verificación (no se ignora la verificación)
 	HostctlKeyPath    string // clave privada del panel, montada de solo lectura
 	SSHPort           int    // puerto SSH del host; nunca se puede bloquear desde el panel
+	// "ufw" (Debian/Ubuntu) o "firewalld" (RHEL/AlmaLinux/Rocky/Fedora) — lo
+	// fija install.sh según la distribución detectada en el host.
+	FirewallBackend string
 
 	// Docker
 	DockerHost       string
@@ -111,6 +114,7 @@ func Load() (*Config, error) {
 		HostctlHostPubkey: env("GOCP_HOSTCTL_HOST_PUBKEY", ""),
 		HostctlKeyPath:    env("GOCP_HOSTCTL_KEY_PATH", ""),
 		SSHPort:           envInt("GOCP_SSH_PORT", 22),
+		FirewallBackend:   env("GOCP_FIREWALL_BACKEND", "ufw"),
 
 		DockerHost:       env("GOCP_DOCKER_HOST", "unix:///var/run/docker.sock"),
 		DockerNetwork:    env("GOCP_DOCKER_NETWORK", "gocp_sites"),

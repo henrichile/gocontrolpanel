@@ -10,40 +10,34 @@ type Rule struct {
 	Port   int    `json:"port"`
 	Proto  string `json:"proto"`
 	Action string `json:"action"` // "allow" | "deny"
-	From   string `json:"from"`   // "Anywhere" salvo que la regla restrinja origen
+	From   string `json:"from"`
 }
 
-// reRuleLine matchea líneas de "ufw status verbose" con forma
-// "22/tcp                     ALLOW IN    Anywhere" (columnas separadas por
-// espacios, ancho variable).
-var reRuleLine = regexp.MustCompile(`^(\d{1,5})(?:/(tcp|udp))?\s+(ALLOW|DENY|LIMIT|REJECT)\s+IN\s+(.+)$`)
+// reNormalizedLine matchea el formato normalizado que el propio script del
+// host emite para "status" (ver install.sh) — "22/tcp allow" — igual para
+// ufw y firewalld, para no tener que parsear el formato humano de cada
+// herramienta (frágil y distinto entre las dos).
+var reNormalizedLine = regexp.MustCompile(`^(\d{1,5})/(tcp|udp)\s+(allow|deny)$`)
 
-// ParseStatus interpreta la salida de "ufw status verbose". Solo se quedan
-// con las reglas de puerto simple (lo que la UI puede administrar); reglas
-// más elaboradas (rangos, por interfaz, etc.) se ignoran acá pero siguen
-// aplicando en el firewall real — esto es una vista simplificada, no el
-// espejo completo de ufw.
+// ParseStatus interpreta la salida ya normalizada por el script del host.
 func ParseStatus(raw string) []Rule {
+	seen := map[string]bool{}
 	var out []Rule
 	for _, line := range strings.Split(raw, "\n") {
 		line = strings.TrimSpace(line)
-		m := reRuleLine.FindStringSubmatch(line)
+		m := reNormalizedLine.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
+		if seen[line] {
+			continue // ufw reporta v4/v6 como filas separadas; se deduplica acá
+		}
+		seen[line] = true
 		port, err := strconv.Atoi(m[1])
 		if err != nil {
 			continue
 		}
-		proto := m[2]
-		if proto == "" {
-			proto = "tcp" // ufw omite "/tcp" cuando no hay ambigüedad con udp
-		}
-		action := "allow"
-		if m[3] != "ALLOW" {
-			action = "deny"
-		}
-		out = append(out, Rule{Port: port, Proto: proto, Action: action, From: strings.TrimSpace(m[4])})
+		out = append(out, Rule{Port: port, Proto: m[2], Action: m[3], From: "Anywhere"})
 	}
 	return out
 }

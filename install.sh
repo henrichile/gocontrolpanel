@@ -386,13 +386,26 @@ EOF
 # bloquear el puerto de SSH. Idempotente: se puede re-correr sin duplicar la
 # clave en authorized_keys ni pisar una clave ya generada.
 configurar_hostctl() {
-    if [[ " $SO_ID $SO_FAMILIA " != *debian* && " $SO_ID $SO_FAMILIA " != *ubuntu* ]]; then
-        aviso "Acceso al firewall desde el panel: distribución no basada en apt, sáltalo."
+    local backend=""
+    if [[ " $SO_ID $SO_FAMILIA " == *debian* || " $SO_ID $SO_FAMILIA " == *ubuntu* ]]; then
+        backend="ufw"
+    elif [[ " $SO_ID $SO_FAMILIA " == *rhel* || " $SO_ID $SO_FAMILIA " == *fedora* \
+         || " $SO_ID $SO_FAMILIA " == *centos* || " $SO_ID $SO_FAMILIA " == *almalinux* \
+         || " $SO_ID $SO_FAMILIA " == *rocky* ]]; then
+        backend="firewalld"
+    else
+        aviso "Acceso al firewall desde el panel: distribución no reconocida, sáltalo."
         return 0
     fi
     if [[ $DRY_RUN -eq 1 ]]; then
-        info "[simulación] configurar acceso SSH del panel al firewall del host"
+        info "[simulación] configurar acceso SSH del panel al firewall del host ($backend)"
         return 0
+    fi
+
+    if [[ "$backend" == "firewalld" ]]; then
+        info "Instalando firewalld…"
+        instalar_paquetes firewalld
+        ejecutar systemctl enable --now firewalld
     fi
 
     local key_file="$GOCP_INSTALL_DIR/.hostctl_key"
@@ -407,18 +420,28 @@ configurar_hostctl() {
     if [[ ! -f "$key_file" ]]; then
         ssh-keygen -t ed25519 -N "" -C "gocp-hostctl" -f "$key_file" >/dev/null
     fi
+    # 65532 es el UID fijo con el que corre el panel dentro de su contenedor
+    # (imagen distroless "nonroot" — ver docker-compose.yml); sin este chown
+    # el panel no puede leer su propia clave privada.
+    chown 65532:65532 "$key_file" 2>/dev/null || true
     chmod 600 "$key_file"
     chmod 644 "$key_file.pub"
 
-    cat >"$script_file" <<EOF
+    if [[ "$backend" == "ufw" ]]; then
+        cat >"$script_file" <<EOF
 #!/usr/bin/env bash
 # Instalado por install.sh — comando forzado para el acceso SSH del panel.
-# Lista blanca estricta: cualquier otra cosa termina en "exit 1".
+# Lista blanca estricta: cualquier otra cosa termina en "exit 1". La salida
+# de "status" se normaliza a "PUERTO/PROTO allow|deny" (una regla por línea)
+# para que el panel no tenga que parsear el formato de cada herramienta.
 set -euo pipefail
 SSH_PORT=${ssh_port}
 case "\${SSH_ORIGINAL_COMMAND:-}" in
     status)
-        exec ufw status verbose
+        ufw status verbose | grep 'ALLOW IN' | grep -v '(v6)' | awk '{
+            split(\$1, a, "/"); proto = (a[2] == "" ? "tcp" : a[2])
+            print a[1]"/"proto" allow"
+        }'
         ;;
     allow\ [0-9]*\ tcp|allow\ [0-9]*\ udp)
         set -- \$SSH_ORIGINAL_COMMAND
@@ -438,6 +461,43 @@ case "\${SSH_ORIGINAL_COMMAND:-}" in
         ;;
 esac
 EOF
+    else
+        cat >"$script_file" <<EOF
+#!/usr/bin/env bash
+# Instalado por install.sh — comando forzado para el acceso SSH del panel
+# (variante firewalld). Lista blanca estricta, misma salida normalizada que
+# la variante ufw: "PUERTO/PROTO allow|deny" para "status".
+set -euo pipefail
+SSH_PORT=${ssh_port}
+ZONE="\$(firewall-cmd --get-default-zone)"
+case "\${SSH_ORIGINAL_COMMAND:-}" in
+    status)
+        firewall-cmd --zone="\$ZONE" --list-ports | tr ' ' '\n' | grep -E '^[0-9]+/(tcp|udp)\$' | sed 's/\$/ allow/'
+        if firewall-cmd --zone="\$ZONE" --list-services | grep -qw ssh; then
+            echo "\${SSH_PORT}/tcp allow"
+        fi
+        ;;
+    allow\ [0-9]*\ tcp|allow\ [0-9]*\ udp)
+        set -- \$SSH_ORIGINAL_COMMAND
+        firewall-cmd --permanent --zone="\$ZONE" --add-port="\${2}/\${3}" >/dev/null
+        exec firewall-cmd --reload
+        ;;
+    deny\ [0-9]*\ tcp|deny\ [0-9]*\ udp)
+        set -- \$SSH_ORIGINAL_COMMAND
+        if [[ "\${2}" == "\${SSH_PORT}" ]]; then
+            echo "rechazado: no se puede bloquear el puerto de SSH (\${SSH_PORT})" >&2
+            exit 1
+        fi
+        firewall-cmd --permanent --zone="\$ZONE" --remove-port="\${2}/\${3}" >/dev/null
+        exec firewall-cmd --reload
+        ;;
+    *)
+        echo "comando no permitido" >&2
+        exit 1
+        ;;
+esac
+EOF
+    fi
     chmod 755 "$script_file"
 
     local pubkey restriccion linea_autorizada
@@ -476,9 +536,10 @@ EOF
         echo "GOCP_HOSTCTL_SSH_PORT=${ssh_port}"
         echo "GOCP_HOSTCTL_HOST_PUBKEY=${host_pubkey}"
         echo "GOCP_HOSTCTL_KEY_PATH=/etc/gocp/hostctl_key"
+        echo "GOCP_FIREWALL_BACKEND=${backend}"
     } >>"$GOCP_INSTALL_DIR/.env"
 
-    ok "Acceso al firewall desde el panel configurado"
+    ok "Acceso al firewall desde el panel configurado ($backend)"
 }
 
 # ──────────────────────────────────────────────────────────────────────────
