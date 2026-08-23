@@ -51,10 +51,16 @@ func New(host string, sshPort int, hostPubkeyLine, privateKeyPath string, protec
 	return &Client{
 		addr: net.JoinHostPort(host, fmt.Sprint(sshPort)),
 		config: &ssh.ClientConfig{
-			User:            "root",
-			Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-			HostKeyCallback: ssh.FixedHostKey(hostKey),
-			Timeout:         10 * time.Second,
+			User: "root",
+			Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)},
+			// Sin esto, la negociación puede ofrecer un tipo de clave de
+			// host distinto (RSA/ECDSA) al que se fijó abajo (ed25519), y
+			// FixedHostKey rechaza la conexión por "host key mismatch"
+			// aunque el host sea el correcto — se fuerza el mismo algoritmo
+			// que el de la clave que install.sh capturó.
+			HostKeyAlgorithms: []string{hostKey.Type()},
+			HostKeyCallback:   ssh.FixedHostKey(hostKey),
+			Timeout:           10 * time.Second,
 		},
 		protectedPort: protectedPort,
 	}, nil
