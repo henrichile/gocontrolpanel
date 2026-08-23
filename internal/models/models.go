@@ -52,20 +52,21 @@ type Plan struct {
 }
 
 type User struct {
-	ID           uuid.UUID  `json:"id"`
-	Username     string     `json:"username"`
-	Email        string     `json:"email"`
-	PasswordHash string     `json:"-"`
-	FullName     string     `json:"full_name"`
-	Role         Role       `json:"role"`
-	ParentID     *uuid.UUID `json:"parent_id,omitempty"`
-	IsActive     bool       `json:"is_active"`
-	TOTPSecret   *string    `json:"-"`
-	TOTPEnabled  bool       `json:"totp_enabled"`
-	TOTPLastStep int64      `json:"-"`
-	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	ID                 uuid.UUID  `json:"id"`
+	Username           string     `json:"username"`
+	Email              string     `json:"email"`
+	PasswordHash       string     `json:"-"`
+	FullName           string     `json:"full_name"`
+	Role               Role       `json:"role"`
+	ParentID           *uuid.UUID `json:"parent_id,omitempty"`
+	IsActive           bool       `json:"is_active"`
+	TOTPSecret         *string    `json:"-"`
+	TOTPEnabled        bool       `json:"totp_enabled"`
+	TOTPLastStep       int64      `json:"-"`
+	LastLoginAt        *time.Time `json:"last_login_at,omitempty"`
+	MustChangePassword bool       `json:"must_change_password"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 type AccountStatus string
@@ -91,8 +92,8 @@ type Account struct {
 	UpdatedAt       time.Time     `json:"updated_at"`
 
 	// Campos calculados para la API (no persistidos).
-	Plan       *Plan `json:"plan,omitempty"`
-	SiteCount  int   `json:"site_count,omitempty"`
+	Plan       *Plan  `json:"plan,omitempty"`
+	SiteCount  int    `json:"site_count,omitempty"`
 	OwnerLogin string `json:"owner_login,omitempty"`
 }
 
@@ -201,6 +202,29 @@ type SystemSettings struct {
 	RateLimitPerMinute  int       `json:"rate_limit_per_minute"`
 	BackupRetentionDays int       `json:"backup_retention_days"`
 	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// SMTPSettings es la única fila de configuración de correo saliente del
+// panel. La contraseña se maneja aparte (nunca viaja en este struct hacia el
+// frontend) — ver Store.GetSMTPPassword.
+type SMTPSettings struct {
+	Host       string    `json:"host"`
+	Port       int       `json:"port"`
+	Username   string    `json:"username"`
+	FromEmail  string    `json:"from_email"`
+	FromName   string    `json:"from_name"`
+	Encryption string    `json:"encryption"`
+	Enabled    bool      `json:"enabled"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// EmailTemplate es una plantilla de correo editable desde el administrador,
+// renderizada con html/template (ver internal/mailer).
+type EmailTemplate struct {
+	Key       string    `json:"key"`
+	Subject   string    `json:"subject"`
+	BodyHTML  string    `json:"body_html"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type SiteGitConfig struct {

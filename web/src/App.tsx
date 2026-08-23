@@ -12,6 +12,7 @@ import SiteDetail from './pages/SiteDetail'
 import Users from './pages/Users'
 import Plans from './pages/Plans'
 import System from './pages/System'
+import Settings from './pages/Settings'
 
 // El panel tiene dos ambientes separados: "Administración del servidor"
 // (admin/reseller: cuentas, usuarios, planes, sistema) y "Panel de
@@ -48,6 +49,7 @@ export default function App() {
           <Route path="/usuarios" element={<Users />} />
           <Route path="/planes" element={<Plans />} />
           <Route path="/sistema" element={<System />} />
+          <Route path="/configuraciones" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
@@ -84,6 +86,7 @@ function Sidebar() {
             <NavLink to="/usuarios">Usuarios</NavLink>
             {isAdmin && <NavLink to="/planes">Planes</NavLink>}
             {isAdmin && <NavLink to="/sistema">Sistema</NavLink>}
+            {isAdmin && <NavLink to="/configuraciones">Configuraciones</NavLink>}
           </>
         )}
       </nav>

@@ -372,3 +372,32 @@ export interface WAFBlock {
   unique_id: string
   raw_json: string
 }
+
+export interface SMTPSettings {
+  host: string
+  port: number
+  username: string
+  password_set: boolean
+  from_email: string
+  from_name: string
+  encryption: 'none' | 'starttls' | 'ssl'
+  enabled: boolean
+}
+
+export interface EmailTemplate {
+  key: string
+  subject: string
+  body_html: string
+  updated_at: string
+}
+
+export interface AccountCredentials {
+  username: string
+  password: string
+}
+
+export interface CreateAccountResponse {
+  account: Account
+  credentials?: AccountCredentials
+  email?: { sent: boolean; error?: string }
+}

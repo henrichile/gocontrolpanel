@@ -30,13 +30,13 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 const userCols = `id, username, email, password_hash, full_name, role, parent_id,
                   is_active, totp_secret, totp_enabled, totp_last_step, last_login_at,
-                  created_at, updated_at`
+                  must_change_password, created_at, updated_at`
 
 func scanUser(row pgx.Row) (*models.User, error) {
 	var u models.User
 	err := row.Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.FullName,
 		&u.Role, &u.ParentID, &u.IsActive, &u.TOTPSecret, &u.TOTPEnabled, &u.TOTPLastStep,
-		&u.LastLoginAt, &u.CreatedAt, &u.UpdatedAt)
+		&u.LastLoginAt, &u.MustChangePassword, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -45,10 +45,10 @@ func scanUser(row pgx.Row) (*models.User, error) {
 
 func (s *Store) CreateUser(ctx context.Context, u *models.User) error {
 	return s.pool.QueryRow(ctx, `
-		INSERT INTO users (username, email, password_hash, full_name, role, parent_id, is_active)
-		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		INSERT INTO users (username, email, password_hash, full_name, role, parent_id, is_active, must_change_password)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		RETURNING id, created_at, updated_at`,
-		u.Username, u.Email, u.PasswordHash, u.FullName, u.Role, u.ParentID, u.IsActive,
+		u.Username, u.Email, u.PasswordHash, u.FullName, u.Role, u.ParentID, u.IsActive, u.MustChangePassword,
 	).Scan(&u.ID, &u.CreatedAt, &u.UpdatedAt)
 }
 

@@ -45,7 +45,11 @@ func (s *Server) handleGetAccount(w http.ResponseWriter, r *http.Request) {
 }
 
 type createAccountRequest struct {
+	OwnerMode     string `json:"owner_mode"` // "existing" (default) | "new"
 	OwnerID       string `json:"owner_id"`
+	OwnerEmail    string `json:"owner_email"`
+	OwnerFullName string `json:"owner_full_name"`
+	OwnerUsername string `json:"owner_username"`
 	PlanID        string `json:"plan_id"`
 	SystemUser    string `json:"system_user"`
 	PrimaryDomain string `json:"primary_domain"`
@@ -62,24 +66,6 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	id := auth.MustIdentity(r.Context())
 
-	ownerID := id.UserID
-	if req.OwnerID != "" {
-		parsed, err := uuid.Parse(req.OwnerID)
-		if err != nil {
-			httpx.FieldError(w, "owner_id", "no es un UUID válido")
-			return
-		}
-		// Un reseller solo puede asignar cuentas a sí mismo o a sus hijos.
-		if id.Role != models.RoleAdmin && parsed != id.UserID {
-			owner, err := s.st.GetUserByID(r.Context(), parsed)
-			if err != nil || owner.ParentID == nil || *owner.ParentID != id.UserID {
-				httpx.Error(w, http.StatusForbidden, "no puedes crear cuentas para ese usuario")
-				return
-			}
-		}
-		ownerID = parsed
-	}
-
 	var planID uuid.UUID
 	if req.PlanID != "" {
 		parsed, err := uuid.Parse(req.PlanID)
@@ -90,15 +76,44 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		planID = parsed
 	}
 
-	acct, err := s.svc.CreateAccount(r.Context(), provision.CreateAccountInput{
-		OwnerID:       ownerID,
+	svcInput := provision.CreateAccountInput{
 		PlanID:        planID,
 		SystemUser:    req.SystemUser,
 		PrimaryDomain: req.PrimaryDomain,
 		Notes:         req.Notes,
 		Provision:     req.Provision,
 		PHPVersion:    req.PHPVersion,
-	})
+		BcryptCost:    s.cfg.BcryptCost,
+		PanelURL:      s.cfg.PublicURL,
+	}
+
+	if req.OwnerMode == "new" {
+		svcInput.OwnerMode = "new"
+		svcInput.OwnerEmail = req.OwnerEmail
+		svcInput.OwnerFullName = req.OwnerFullName
+		svcInput.OwnerUsername = req.OwnerUsername
+	} else {
+		ownerID := id.UserID
+		if req.OwnerID != "" {
+			parsed, err := uuid.Parse(req.OwnerID)
+			if err != nil {
+				httpx.FieldError(w, "owner_id", "no es un UUID válido")
+				return
+			}
+			// Un reseller solo puede asignar cuentas a sí mismo o a sus hijos.
+			if id.Role != models.RoleAdmin && parsed != id.UserID {
+				owner, err := s.st.GetUserByID(r.Context(), parsed)
+				if err != nil || owner.ParentID == nil || *owner.ParentID != id.UserID {
+					httpx.Error(w, http.StatusForbidden, "no puedes crear cuentas para ese usuario")
+					return
+				}
+			}
+			ownerID = parsed
+		}
+		svcInput.OwnerID = ownerID
+	}
+
+	result, err := s.svc.CreateAccount(r.Context(), svcInput)
 	if err != nil {
 		var ve provision.ValidationError
 		if asValidation(err, &ve) {
@@ -108,6 +123,7 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	acct := result.Account
 
 	s.st.Audit(r.Context(), models.AuditEntry{
 		ActorID: &id.UserID, ActorUsername: id.Username,
@@ -115,7 +131,16 @@ func (s *Server) handleCreateAccount(w http.ResponseWriter, r *http.Request) {
 		Detail:    map[string]any{"system_user": acct.SystemUser, "domain": acct.PrimaryDomain},
 		IPAddress: httpx.ClientIP(r),
 	})
-	httpx.Created(w, map[string]any{"account": acct})
+
+	resp := map[string]any{"account": acct}
+	if result.GeneratedPassword != "" {
+		resp["credentials"] = map[string]any{
+			"username": result.GeneratedUsername,
+			"password": result.GeneratedPassword,
+		}
+		resp["email"] = map[string]any{"sent": result.EmailSent, "error": result.EmailError}
+	}
+	httpx.Created(w, resp)
 }
 
 type suspendRequest struct {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api, type Account, type ApiError, type Plan } from '../api'
+import { api, type Account, type AccountCredentials, type ApiError, type CreateAccountResponse, type Plan } from '../api'
 import { useAuth } from '../auth'
 import {
   Alert, Card, Empty, Modal, SkeletonRows, StatusBadge,
@@ -15,6 +15,11 @@ export default function Accounts() {
   const [plans, setPlans] = useState<Plan[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [credentials, setCredentials] = useState<{
+    systemUser: string
+    credentials: AccountCredentials
+    email?: { sent: boolean; error?: string }
+  } | null>(null)
   const [filter, setFilter] = useState('')
   const { confirm, dialog: confirmDialog } = useConfirm()
   const { ask, dialog: promptDialog } = useReasonPrompt()
@@ -145,11 +150,23 @@ export default function Accounts() {
         <CreateAccountModal
           plans={plans}
           onClose={() => setCreating(false)}
-          onCreated={(name) => {
+          onCreated={(name, resp) => {
             setCreating(false)
             toast.success(`Cuenta ${name} creada`)
+            if (resp.credentials) {
+              setCredentials({ systemUser: name, credentials: resp.credentials, email: resp.email })
+            }
             void reload()
           }}
+        />
+      )}
+
+      {credentials && (
+        <CredentialsModal
+          systemUser={credentials.systemUser}
+          credentials={credentials.credentials}
+          email={credentials.email}
+          onClose={() => setCredentials(null)}
         />
       )}
     </>
@@ -159,9 +176,13 @@ export default function Accounts() {
 function CreateAccountModal({ plans, onClose, onCreated }: {
   plans: Plan[]
   onClose: () => void
-  onCreated: (systemUser: string) => void
+  onCreated: (systemUser: string, resp: CreateAccountResponse) => void
 }) {
   const [form, setForm] = useState({
+    owner_mode: 'new' as 'new' | 'existing',
+    owner_full_name: '',
+    owner_email: '',
+    owner_username: '',
     system_user: '',
     primary_domain: '',
     plan_id: plans.find((p) => p.is_default)?.id ?? plans[0]?.id ?? '',
@@ -178,8 +199,8 @@ function CreateAccountModal({ plans, onClose, onCreated }: {
     setError('')
     setFields({})
     try {
-      await api.post('/accounts', form)
-      onCreated(form.system_user)
+      const resp = await api.post<CreateAccountResponse>('/accounts', form)
+      onCreated(form.system_user, resp)
     } catch (err) {
       const apiErr = err as ApiError
       setError(apiErr.message)
@@ -195,6 +216,58 @@ function CreateAccountModal({ plans, onClose, onCreated }: {
     <Modal title="Crear cuenta de hosting" onClose={onClose}>
       <form onSubmit={submit}>
         {error && <Alert kind="error">{error}</Alert>}
+
+        <div className="field">
+          <label htmlFor="owner_mode">Propietario</label>
+          <select
+            id="owner_mode"
+            value={form.owner_mode}
+            onChange={(e) => setForm({ ...form, owner_mode: e.target.value as 'new' | 'existing' })}
+          >
+            <option value="new">Cliente nuevo (se generan sus accesos)</option>
+            <option value="existing">Yo mismo / cuenta propia</option>
+          </select>
+        </div>
+
+        {form.owner_mode === 'new' && (
+          <div className="row">
+            <div className="field">
+              <label htmlFor="owner_full_name">Nombre completo del cliente</label>
+              <input
+                id="owner_full_name"
+                value={form.owner_full_name}
+                onChange={(e) => setForm({ ...form, owner_full_name: e.target.value })}
+                placeholder="Juana Pérez"
+                required
+              />
+              {fields.owner_full_name && <div className="field-error">{fields.owner_full_name}</div>}
+            </div>
+            <div className="field">
+              <label htmlFor="owner_email">Email del cliente</label>
+              <input
+                id="owner_email"
+                type="email"
+                value={form.owner_email}
+                onChange={(e) => setForm({ ...form, owner_email: e.target.value })}
+                placeholder="juana@miempresa.cl"
+                required
+              />
+              {fields.owner_email && <div className="field-error">{fields.owner_email}</div>}
+            </div>
+          </div>
+        )}
+
+        {form.owner_mode === 'new' && (
+          <div className="field">
+            <label htmlFor="owner_username">Usuario de acceso (opcional)</label>
+            <input
+              id="owner_username"
+              value={form.owner_username}
+              onChange={(e) => setForm({ ...form, owner_username: e.target.value })}
+              placeholder="se genera a partir del usuario del sistema si se deja vacío"
+            />
+          </div>
+        )}
 
         <div className="row">
           <div className="field">
@@ -265,6 +338,63 @@ function CreateAccountModal({ plans, onClose, onCreated }: {
           </button>
         </div>
       </form>
+    </Modal>
+  )
+}
+
+// Muestra los accesos generados para un cliente nuevo justo después de crear
+// su cuenta: es la única vez que la contraseña en claro está disponible.
+function CredentialsModal({ systemUser, credentials, email, onClose }: {
+  systemUser: string
+  credentials: AccountCredentials
+  email?: { sent: boolean; error?: string }
+  onClose: () => void
+}) {
+  const [copied, setCopied] = useState(false)
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(
+        `Usuario: ${credentials.username}\nContraseña: ${credentials.password}`,
+      )
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      /* clipboard no disponible: el usuario puede copiar los campos a mano */
+    }
+  }
+
+  return (
+    <Modal title={`Accesos de ${systemUser}`} onClose={onClose}>
+      <Alert kind="info">
+        Esta contraseña no se podrá volver a mostrar. Cópiala o entrégala al cliente ahora.
+      </Alert>
+
+      <div className="row">
+        <div className="field">
+          <label htmlFor="cred-username">Usuario</label>
+          <input id="cred-username" value={credentials.username} readOnly />
+        </div>
+        <div className="field">
+          <label htmlFor="cred-password">Contraseña</label>
+          <input id="cred-password" value={credentials.password} readOnly />
+        </div>
+      </div>
+
+      {email && (
+        email.sent ? (
+          <Alert kind="success">Se envió un correo con estos accesos al cliente.</Alert>
+        ) : (
+          <Alert kind="error">
+            No se pudo enviar el correo{email.error ? `: ${email.error}` : ''}. Copia la contraseña ahora.
+          </Alert>
+        )
+      )}
+
+      <div className="modal-actions">
+        <button onClick={() => void copy()}>{copied ? 'Copiado' : 'Copiar accesos'}</button>
+        <button className="primary" onClick={onClose}>Listo</button>
+      </div>
     </Modal>
   )
 }

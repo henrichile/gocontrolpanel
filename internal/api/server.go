@@ -180,6 +180,14 @@ func (s *Server) Handler() http.Handler {
 				r.Post("/system/security/firewall/rules", s.handleSetFirewallRule)
 				r.Get("/system/security/waf-blocks", s.handleListWAFBlocks)
 				r.Get("/system/security/waf-blocks/stream", s.handleStreamWAFBlocks)
+
+				// Correo saliente: configuración SMTP y plantillas editables
+				r.Get("/system/mail/smtp", s.handleGetSMTPSettings)
+				r.Put("/system/mail/smtp", s.handleUpdateSMTPSettings)
+				r.Post("/system/mail/smtp/test", s.handleTestSMTP)
+				r.Get("/system/mail/templates", s.handleListEmailTemplates)
+				r.Get("/system/mail/templates/{key}", s.handleGetEmailTemplate)
+				r.Put("/system/mail/templates/{key}", s.handleUpdateEmailTemplate)
 			})
 		})
 	})

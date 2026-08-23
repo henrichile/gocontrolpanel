@@ -16,9 +16,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/etasoft/gocontrolpanel/internal/auth"
 	"github.com/etasoft/gocontrolpanel/internal/caddyapi"
 	"github.com/etasoft/gocontrolpanel/internal/config"
 	"github.com/etasoft/gocontrolpanel/internal/dockerx"
+	"github.com/etasoft/gocontrolpanel/internal/mailer"
 	"github.com/etasoft/gocontrolpanel/internal/models"
 	"github.com/etasoft/gocontrolpanel/internal/store"
 )
@@ -61,7 +63,15 @@ func (e ValidationError) Error() string { return e.Field + ": " + e.Message }
 // --- Cuentas ---------------------------------------------------------------
 
 type CreateAccountInput struct {
+	// OwnerMode es "existing" (usa OwnerID, comportamiento original) o "new"
+	// (crea un cliente nuevo con credenciales generadas y lo asigna como
+	// propietario). Vacío se trata como "existing".
+	OwnerMode     string
 	OwnerID       uuid.UUID
+	OwnerEmail    string
+	OwnerFullName string
+	OwnerUsername string
+
 	PlanID        uuid.UUID
 	SystemUser    string
 	PrimaryDomain string
@@ -69,9 +79,26 @@ type CreateAccountInput struct {
 	// Si es true se crea también el sitio principal y su contenedor.
 	Provision  bool
 	PHPVersion string
+
+	// BCryptCost y PanelURL son necesarios solo cuando OwnerMode=="new".
+	BcryptCost int
+	PanelURL   string
 }
 
-func (s *Service) CreateAccount(ctx context.Context, in CreateAccountInput) (*models.Account, error) {
+// CreateAccountResult envuelve la cuenta creada más, si se generó un cliente
+// nuevo, sus credenciales en claro (nunca recuperables después de esta
+// respuesta) y el resultado del envío del correo de bienvenida.
+type CreateAccountResult struct {
+	Account *models.Account
+
+	GeneratedUsername string
+	GeneratedPassword string
+
+	EmailSent  bool
+	EmailError string
+}
+
+func (s *Service) CreateAccount(ctx context.Context, in CreateAccountInput) (*CreateAccountResult, error) {
 	in.SystemUser = strings.ToLower(strings.TrimSpace(in.SystemUser))
 	in.PrimaryDomain = normalizeDomain(in.PrimaryDomain)
 
@@ -88,6 +115,18 @@ func (s *Service) CreateAccount(ctx context.Context, in CreateAccountInput) (*mo
 		return nil, err
 	}
 
+	result := &CreateAccountResult{}
+
+	if in.OwnerMode == "new" {
+		newUser, plainPassword, err := s.createOwnerUser(ctx, in)
+		if err != nil {
+			return nil, err
+		}
+		in.OwnerID = newUser.ID
+		result.GeneratedUsername = newUser.Username
+		result.GeneratedPassword = plainPassword
+	}
+
 	acct := &models.Account{
 		OwnerID:       in.OwnerID,
 		PlanID:        plan.ID,
@@ -97,11 +136,17 @@ func (s *Service) CreateAccount(ctx context.Context, in CreateAccountInput) (*mo
 		Notes:         in.Notes,
 	}
 	if err := s.st.CreateAccount(ctx, acct); err != nil {
+		if in.OwnerMode == "new" {
+			_ = s.st.DeleteUser(ctx, in.OwnerID)
+		}
 		return nil, err
 	}
 
 	if err := s.prepareAccountDirs(acct.SystemUser); err != nil {
 		_ = s.st.DeleteAccount(ctx, acct.ID)
+		if in.OwnerMode == "new" {
+			_ = s.st.DeleteUser(ctx, in.OwnerID)
+		}
 		return nil, fmt.Errorf("preparando el directorio de la cuenta: %w", err)
 	}
 
@@ -111,10 +156,10 @@ func (s *Service) CreateAccount(ctx context.Context, in CreateAccountInput) (*mo
 			php = plan.PHPVersions[len(plan.PHPVersions)-1]
 		}
 		_, err := s.CreateSite(ctx, CreateSiteInput{
-			AccountID:   acct.ID,
-			Name:        "principal",
-			PHPVersion:  php,
-			Domain:      acct.PrimaryDomain,
+			AccountID:    acct.ID,
+			Name:         "principal",
+			PHPVersion:   php,
+			Domain:       acct.PrimaryDomain,
 			DocumentRoot: "public",
 		})
 		if err != nil {
@@ -124,7 +169,105 @@ func (s *Service) CreateAccount(ctx context.Context, in CreateAccountInput) (*mo
 	}
 
 	acct.Plan = plan
-	return acct, nil
+	result.Account = acct
+
+	if in.OwnerMode == "new" {
+		s.sendWelcomeEmail(ctx, in, acct, result)
+	}
+
+	return result, nil
+}
+
+// createOwnerUser crea el cliente nuevo con credenciales generadas para
+// asignarlo como propietario de la cuenta que se está creando.
+func (s *Service) createOwnerUser(ctx context.Context, in CreateAccountInput) (*models.User, string, error) {
+	if in.OwnerEmail == "" {
+		return nil, "", ValidationError{"owner_email", "obligatorio para un cliente nuevo"}
+	}
+	if in.OwnerFullName == "" {
+		return nil, "", ValidationError{"owner_full_name", "obligatorio para un cliente nuevo"}
+	}
+
+	username := strings.ToLower(strings.TrimSpace(in.OwnerUsername))
+	if username == "" {
+		username = in.SystemUser
+	}
+
+	plain, err := auth.RandomPassword(16)
+	if err != nil {
+		return nil, "", fmt.Errorf("generando la contraseña del cliente: %w", err)
+	}
+	hash, err := auth.HashPassword(plain, in.BcryptCost)
+	if err != nil {
+		return nil, "", fmt.Errorf("hasheando la contraseña del cliente: %w", err)
+	}
+
+	newUser := &models.User{
+		Username:           username,
+		Email:              in.OwnerEmail,
+		PasswordHash:       hash,
+		FullName:           in.OwnerFullName,
+		Role:               models.RoleUser,
+		IsActive:           true,
+		MustChangePassword: true,
+	}
+	if err := s.st.CreateUser(ctx, newUser); err != nil {
+		return nil, "", err
+	}
+	return newUser, plain, nil
+}
+
+// sendWelcomeEmail nunca hace fallar la creación de la cuenta: cualquier
+// error de plantilla/SMTP se refleja en result.EmailError, no se propaga.
+func (s *Service) sendWelcomeEmail(ctx context.Context, in CreateAccountInput, acct *models.Account, result *CreateAccountResult) {
+	tpl, err := s.st.GetEmailTemplate(ctx, "bienvenida_cliente")
+	if err != nil {
+		result.EmailError = "no se pudo cargar la plantilla de bienvenida: " + err.Error()
+		slog.Error("plantilla de bienvenida no disponible", "error", err)
+		return
+	}
+	settings, err := s.st.GetSMTPSettings(ctx)
+	if err != nil {
+		result.EmailError = "no se pudo cargar la configuración SMTP: " + err.Error()
+		slog.Error("configuración SMTP no disponible", "error", err)
+		return
+	}
+	if !settings.Enabled {
+		result.EmailError = "el envío de correo está deshabilitado en Configuraciones"
+		return
+	}
+	password, err := s.st.GetSMTPPassword(ctx)
+	if err != nil {
+		result.EmailError = "no se pudo cargar la contraseña SMTP: " + err.Error()
+		slog.Error("contraseña SMTP no disponible", "error", err)
+		return
+	}
+
+	subject, body, err := mailer.RenderTemplate(tpl.Subject, tpl.BodyHTML, mailer.WelcomeData{
+		FullName: in.OwnerFullName,
+		Username: result.GeneratedUsername,
+		Password: result.GeneratedPassword,
+		PanelURL: in.PanelURL,
+		Domain:   acct.PrimaryDomain,
+	})
+	if err != nil {
+		result.EmailError = "no se pudo generar el correo: " + err.Error()
+		slog.Error("renderizando plantilla de bienvenida", "error", err)
+		return
+	}
+
+	client := mailer.New(mailer.SMTPConfig{
+		Host: settings.Host, Port: settings.Port, Username: settings.Username, Password: password,
+		FromEmail: settings.FromEmail, FromName: settings.FromName,
+		Encryption: settings.Encryption, Enabled: settings.Enabled,
+	})
+	if err := client.Send(ctx, in.OwnerEmail, subject, body); err != nil {
+		result.EmailError = err.Error()
+		slog.Error("no se pudo enviar el correo de bienvenida",
+			"account", acct.SystemUser, "to", in.OwnerEmail, "error", err)
+		return
+	}
+	result.EmailSent = true
 }
 
 func (s *Service) SuspendAccount(ctx context.Context, id uuid.UUID, reason string) error {
