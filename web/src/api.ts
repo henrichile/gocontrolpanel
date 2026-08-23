@@ -348,3 +348,27 @@ export interface SecurityStatus {
   totp_enabled_admins: number
   total_admins: number
 }
+
+export interface FirewallRule {
+  port: number
+  proto: 'tcp' | 'udp'
+  action: 'allow' | 'deny'
+  from: string
+}
+
+export interface FirewallStatus {
+  configured: boolean
+  rules?: FirewallRule[]
+  protected_port?: number
+  error?: string
+}
+
+export interface WAFBlock {
+  id: number
+  occurred_at: string
+  client_ip: string
+  hostname: string
+  uri: string
+  unique_id: string
+  raw_json: string
+}

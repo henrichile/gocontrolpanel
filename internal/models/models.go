@@ -182,6 +182,18 @@ type CronJob struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+// WAFBlock es una petición bloqueada por Coraza, capturada del log del
+// contenedor de borde.
+type WAFBlock struct {
+	ID         int64     `json:"id"`
+	OccurredAt time.Time `json:"occurred_at"`
+	ClientIP   string    `json:"client_ip"`
+	Hostname   string    `json:"hostname"`
+	URI        string    `json:"uri"`
+	UniqueID   string    `json:"unique_id"`
+	RawJSON    string    `json:"raw_json"`
+}
+
 // SystemSettings es la única fila de configuración de seguridad del
 // servidor, editable desde el ambiente de administración.
 type SystemSettings struct {

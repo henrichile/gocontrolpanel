@@ -2,6 +2,11 @@ bin/
 .env
 *.log
 
+# Clave SSH del panel para el acceso al firewall del host (generada por
+# install.sh, ver internal/hostctl).
+.hostctl_key
+.hostctl_key.pub
+
 # El build de la SPA se genera con `make web`; solo se versiona el placeholder.
 web/node_modules/
 web/dist/assets/

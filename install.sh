@@ -379,6 +379,108 @@ EOF
     ok "Firewall y fail2ban configurados"
 }
 
+# configurar_hostctl da de alta el acceso SSH con comando forzado que usa el
+# panel para leer/editar el firewall del host (ver internal/hostctl). Nunca
+# le da al panel una shell: el authorized_keys fuerza un script propio con
+# una lista blanca de acciones (status/allow/deny), que además nunca permite
+# bloquear el puerto de SSH. Idempotente: se puede re-correr sin duplicar la
+# clave en authorized_keys ni pisar una clave ya generada.
+configurar_hostctl() {
+    if [[ " $SO_ID $SO_FAMILIA " != *debian* && " $SO_ID $SO_FAMILIA " != *ubuntu* ]]; then
+        aviso "Acceso al firewall desde el panel: distribución no basada en apt, sáltalo."
+        return 0
+    fi
+    if [[ $DRY_RUN -eq 1 ]]; then
+        info "[simulación] configurar acceso SSH del panel al firewall del host"
+        return 0
+    fi
+
+    local key_file="$GOCP_INSTALL_DIR/.hostctl_key"
+    local script_file="/usr/local/bin/gocp-hostctl-allowed.sh"
+    local ssh_port="${GOCP_SSH_PORT:-22}"
+
+    # La clave ya debería existir (generar_clave_hostctl la crea antes del
+    # primer "docker compose up", para que el bind mount del panel apunte a
+    # un archivo real y no a un directorio vacío que Docker crearía solo si
+    # el archivo no existiera todavía). Si por lo que sea no está, se genera
+    # ahora igual.
+    if [[ ! -f "$key_file" ]]; then
+        ssh-keygen -t ed25519 -N "" -C "gocp-hostctl" -f "$key_file" >/dev/null
+    fi
+    chmod 600 "$key_file"
+    chmod 644 "$key_file.pub"
+
+    cat >"$script_file" <<EOF
+#!/usr/bin/env bash
+# Instalado por install.sh — comando forzado para el acceso SSH del panel.
+# Lista blanca estricta: cualquier otra cosa termina en "exit 1".
+set -euo pipefail
+SSH_PORT=${ssh_port}
+case "\${SSH_ORIGINAL_COMMAND:-}" in
+    status)
+        exec ufw status verbose
+        ;;
+    allow\ [0-9]*\ tcp|allow\ [0-9]*\ udp)
+        set -- \$SSH_ORIGINAL_COMMAND
+        exec ufw allow "\${2}/\${3}"
+        ;;
+    deny\ [0-9]*\ tcp|deny\ [0-9]*\ udp)
+        set -- \$SSH_ORIGINAL_COMMAND
+        if [[ "\${2}" == "\${SSH_PORT}" ]]; then
+            echo "rechazado: no se puede bloquear el puerto de SSH (\${SSH_PORT})" >&2
+            exit 1
+        fi
+        exec ufw delete allow "\${2}/\${3}"
+        ;;
+    *)
+        echo "comando no permitido" >&2
+        exit 1
+        ;;
+esac
+EOF
+    chmod 755 "$script_file"
+
+    local pubkey restriccion linea_autorizada
+    pubkey="$(cat "$key_file.pub")"
+    restriccion="command=\"$script_file\",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty"
+    linea_autorizada="$restriccion $pubkey"
+
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    touch /root/.ssh/authorized_keys
+    if ! grep -qF "$pubkey" /root/.ssh/authorized_keys 2>/dev/null; then
+        echo "$linea_autorizada" >>/root/.ssh/authorized_keys
+        chmod 600 /root/.ssh/authorized_keys
+        ok "Clave del panel agregada a authorized_keys (con comando forzado)"
+    else
+        ok "La clave del panel ya estaba en authorized_keys"
+    fi
+
+    local host_pubkey=""
+    for f in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
+        if [[ -r "$f" ]]; then
+            host_pubkey="$(cat "$f")"
+            break
+        fi
+    done
+    if [[ -z "$host_pubkey" ]]; then
+        aviso "No se encontró la clave pública del host; el panel no podrá verificar la conexión SSH."
+        aviso "El firewall no quedará administrable desde el panel hasta que resuelvas esto a mano."
+        return 0
+    fi
+
+    {
+        echo ""
+        echo "GOCP_SSH_PORT=${ssh_port}"
+        echo "GOCP_HOSTCTL_HOST=host.docker.internal"
+        echo "GOCP_HOSTCTL_SSH_PORT=${ssh_port}"
+        echo "GOCP_HOSTCTL_HOST_PUBKEY=${host_pubkey}"
+        echo "GOCP_HOSTCTL_KEY_PATH=/etc/gocp/hostctl_key"
+    } >>"$GOCP_INSTALL_DIR/.env"
+
+    ok "Acceso al firewall desde el panel configurado"
+}
+
 # ──────────────────────────────────────────────────────────────────────────
 # 2. Docker
 # ──────────────────────────────────────────────────────────────────────────
@@ -758,6 +860,27 @@ EOF
     ok "Configuración escrita en $env_file"
 }
  
+generar_clave_hostctl() {
+    if [[ $DRY_RUN -eq 1 ]]; then
+        return 0
+    fi
+    local key_file="$GOCP_INSTALL_DIR/.hostctl_key"
+    if [[ -f "$key_file" ]]; then
+        return 0
+    fi
+    if [[ -e "$key_file" ]]; then
+        # docker compose ya creó un directorio vacío ahí en algún intento
+        # anterior (bind mount a un archivo que todavía no existía): hay que
+        # sacarlo del medio antes de poder generar la clave de verdad.
+        rmdir "$key_file" 2>/dev/null || true
+    fi
+    # Necesaria antes del primer "docker compose up": el panel monta este
+    # archivo, y si no existe todavía Docker crea ahí un directorio vacío en
+    # su lugar (rompiendo el ssh-keygen de más adelante en configurar_hostctl).
+    ssh-keygen -t ed25519 -N "" -C "gocp-hostctl" -f "$key_file" >/dev/null 2>&1 || true
+    [[ -f "$key_file" ]] && chmod 600 "$key_file" && chmod 644 "$key_file.pub"
+}
+
 preparar_directorios() {
     ejecutar mkdir -p "$GOCP_DATA_DIR"
     # La imagen del panel es distroless y corre como el usuario "nonroot"
@@ -967,6 +1090,7 @@ main() {
     paso "5/9  Configuración"
     escribir_env
     preparar_directorios
+    generar_clave_hostctl
 
     paso "6/9  Imágenes de PHP"
     construir_imagenes
@@ -978,6 +1102,11 @@ main() {
 
     paso "8/9  Endureciendo el host (firewall + fail2ban)"
     endurecer_host
+    configurar_hostctl
+    if [[ $DRY_RUN -ne 1 ]]; then
+        info "Reiniciando el panel para que tome el acceso nuevo al firewall…"
+        ( cd "$GOCP_INSTALL_DIR" && ejecutar docker compose up -d panel )
+    fi
 
     paso "9/9  Comprobaciones finales"
     comprobar_dns

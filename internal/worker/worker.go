@@ -31,6 +31,7 @@ func (r *Runner) Start(ctx context.Context) {
 	go r.reconcileLoop(ctx)
 	go r.housekeepingLoop(ctx)
 	go r.backupLoop(ctx)
+	go r.wafLogLoop(ctx)
 }
 
 // metricsLoop guarda una muestra de CPU/memoria por sitio en ejecución.
@@ -234,6 +235,9 @@ func (r *Runner) housekeepingLoop(ctx context.Context) {
 			}
 			if err := r.st.PurgeOldUsage(ctx, 30*24*time.Hour); err != nil {
 				slog.Warn("no se pudieron limpiar las métricas antiguas", "error", err)
+			}
+			if err := r.st.PruneOldWAFBlocks(ctx, 30*24*time.Hour); err != nil {
+				slog.Warn("no se pudo limpiar el registro de bloqueos del WAF", "error", err)
 			}
 		}
 	}

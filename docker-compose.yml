@@ -100,6 +100,20 @@ services:
       GOCP_ADMIN_USER: ${GOCP_ADMIN_USER:-admin}
       GOCP_ADMIN_EMAIL: ${GOCP_ADMIN_EMAIL:-admin@localhost}
       GOCP_ADMIN_PASSWORD: ${GOCP_ADMIN_PASSWORD:-}
+      # Acceso al firewall del host vía SSH con comando forzado (ver
+      # internal/hostctl e install.sh). Si install.sh no llegó a configurar
+      # esto (instalación vieja, o distro no soportada), estas variables
+      # quedan vacías y la pestaña de firewall se muestra como "no
+      # configurado" — no rompe nada.
+      GOCP_SSH_PORT: ${GOCP_SSH_PORT:-22}
+      GOCP_HOSTCTL_HOST: ${GOCP_HOSTCTL_HOST:-}
+      GOCP_HOSTCTL_SSH_PORT: ${GOCP_HOSTCTL_SSH_PORT:-22}
+      GOCP_HOSTCTL_HOST_PUBKEY: ${GOCP_HOSTCTL_HOST_PUBKEY:-}
+      GOCP_HOSTCTL_KEY_PATH: ${GOCP_HOSTCTL_KEY_PATH:-}
+    # Nombre especial de Docker que resuelve a la IP del host desde dentro
+    # del contenedor — así el panel llega al SSH del host sin redes nuevas.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # El panel crea y controla los contenedores de los sitios. Montar el
       # socket equivale a dar acceso root al host: mantén el panel accesible
@@ -110,6 +124,9 @@ services:
       # ":z" re-etiqueta el directorio para SELinux (RHEL/AlmaLinux/Rocky con
       # SELinux en enforcing); en distros sin SELinux la opción se ignora.
       - /srv/gocp/accounts:/srv/gocp/accounts:z
+      # Clave privada dedicada para el acceso SSH de solo firewall (ver
+      # arriba); no existe hasta que install.sh corre configurar_hostctl.
+      - ./.hostctl_key:/etc/gocp/hostctl_key:ro
     networks:
       - sites
     healthcheck:

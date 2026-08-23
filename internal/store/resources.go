@@ -286,6 +286,119 @@ func (s *Store) DeleteSiteGitConfig(ctx context.Context, siteID uuid.UUID) error
 	return nil
 }
 
+// --- Log de bloqueos del WAF ------------------------------------------------
+
+func (s *Store) RecordWAFBlock(ctx context.Context, b *models.WAFBlock) error {
+	return s.pool.QueryRow(ctx, `
+		INSERT INTO waf_blocks (client_ip, hostname, uri, unique_id, raw_json)
+		VALUES ($1,$2,$3,$4,$5) RETURNING id, occurred_at`,
+		b.ClientIP, b.Hostname, b.URI, b.UniqueID, b.RawJSON,
+	).Scan(&b.ID, &b.OccurredAt)
+}
+
+// ListWAFBlocks devuelve como mucho `limit` bloqueos con id > afterID,
+// ordenados del más antiguo al más reciente — sirve tanto para paginar
+// historial hacia atrás (afterID=0, se invierte en el handler si hace
+// falta) como para el polling del stream en vivo (afterID = último id visto).
+func (s *Store) ListWAFBlocks(ctx context.Context, afterID int64, limit int) ([]models.WAFBlock, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, occurred_at, client_ip, hostname, uri, unique_id, raw_json
+		FROM waf_blocks WHERE id > $1 ORDER BY id ASC LIMIT $2`, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []models.WAFBlock{}
+	for rows.Next() {
+		var b models.WAFBlock
+		if err := rows.Scan(&b.ID, &b.OccurredAt, &b.ClientIP, &b.Hostname,
+			&b.URI, &b.UniqueID, &b.RawJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// ListWAFBlocksBefore trae hasta `limit` bloqueos con id < beforeID,
+// ordenados del más antiguo al más reciente — para paginar el historial
+// hacia atrás desde la UI ("cargar más").
+func (s *Store) ListWAFBlocksBefore(ctx context.Context, beforeID int64, limit int) ([]models.WAFBlock, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, occurred_at, client_ip, hostname, uri, unique_id, raw_json
+		FROM waf_blocks WHERE id < $1 ORDER BY id DESC LIMIT $2`, beforeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []models.WAFBlock{}
+	for rows.Next() {
+		var b models.WAFBlock
+		if err := rows.Scan(&b.ID, &b.OccurredAt, &b.ClientIP, &b.Hostname,
+			&b.URI, &b.UniqueID, &b.RawJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	// Se pidió DESC (para traer los más recientes por debajo de beforeID),
+	// pero se devuelve en orden cronológico ascendente, igual que ListWAFBlocks.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
+}
+
+// ListLatestWAFBlocks trae los `limit` bloqueos más recientes, en orden
+// cronológico ascendente (igual que las demás — el más nuevo va al final).
+// Es lo que carga la pestaña de Seguridad al abrirla.
+func (s *Store) ListLatestWAFBlocks(ctx context.Context, limit int) ([]models.WAFBlock, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, occurred_at, client_ip, hostname, uri, unique_id, raw_json
+		FROM waf_blocks ORDER BY id DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []models.WAFBlock{}
+	for rows.Next() {
+		var b models.WAFBlock
+		if err := rows.Scan(&b.ID, &b.OccurredAt, &b.ClientIP, &b.Hostname,
+			&b.URI, &b.UniqueID, &b.RawJSON); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return out, rows.Err()
+}
+
+// LatestWAFBlockID sirve para que un cliente que recién abre el stream en
+// vivo arranque desde "ahora" en vez de recibir todo el historial de golpe.
+func (s *Store) LatestWAFBlockID(ctx context.Context) (int64, error) {
+	var id int64
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE(MAX(id), 0) FROM waf_blocks`).Scan(&id)
+	return id, err
+}
+
+func (s *Store) PruneOldWAFBlocks(ctx context.Context, olderThan time.Duration) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM waf_blocks WHERE occurred_at < $1`, time.Now().Add(-olderThan))
+	return err
+}
+
 // --- Configuración de seguridad del servidor --------------------------------
 
 func (s *Store) GetSystemSettings(ctx context.Context) (*models.SystemSettings, error) {

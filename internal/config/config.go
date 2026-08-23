@@ -40,6 +40,16 @@ type Config struct {
 	// compilado con esos plugins (ver deploy/edge/Dockerfile); si el WAF se
 	// activa contra un Caddy sin ellos, el /load de la config falla.
 	CorazaDirectives string
+	EdgeContainerName string // nombre real del contenedor de borde, para leer sus logs (registro de bloqueos del WAF)
+
+	// Acceso al firewall del host (ufw) vía SSH con comando forzado — ver
+	// internal/hostctl y install.sh. Vacío = la pestaña de firewall se
+	// muestra como "no configurado", nada más.
+	HostctlHost       string
+	HostctlSSHPort    int
+	HostctlHostPubkey string // clave pública del host, para fijar la verificación (no se ignora la verificación)
+	HostctlKeyPath    string // clave privada del panel, montada de solo lectura
+	SSHPort           int    // puerto SSH del host; nunca se puede bloquear desde el panel
 
 	// Docker
 	DockerHost       string
@@ -94,6 +104,14 @@ func Load() (*Config, error) {
 			"Include /etc/coraza-crs/crs-setup.conf\n"+
 				"Include /etc/coraza-crs/rules/*.conf\n"+
 				"SecRuleEngine On"),
+		EdgeContainerName: env("GOCP_EDGE_CONTAINER_NAME", "gocp-edge"),
+
+		HostctlHost:       env("GOCP_HOSTCTL_HOST", ""),
+		HostctlSSHPort:    envInt("GOCP_HOSTCTL_SSH_PORT", 22),
+		HostctlHostPubkey: env("GOCP_HOSTCTL_HOST_PUBKEY", ""),
+		HostctlKeyPath:    env("GOCP_HOSTCTL_KEY_PATH", ""),
+		SSHPort:           envInt("GOCP_SSH_PORT", 22),
+
 		DockerHost:       env("GOCP_DOCKER_HOST", "unix:///var/run/docker.sock"),
 		DockerNetwork:    env("GOCP_DOCKER_NETWORK", "gocp_sites"),
 		SiteImagePrefix:  env("GOCP_SITE_IMAGE_PREFIX", "gocp/frankenphp"),
