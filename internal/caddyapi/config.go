@@ -288,10 +288,12 @@ func reverseProxyHandler(upstream string, panel bool) (json.RawMessage, error) {
 
 // wafHandler arma el handler de Coraza (github.com/corazawaf/coraza-caddy),
 // el WAF equivalente a mod_security que corre sobre las reglas OWASP CRS ya
-// horneadas en la imagen del borde (ver deploy/edge/Dockerfile).
+// horneadas en la imagen del borde (ver deploy/edge/Dockerfile). El ID de
+// módulo JSON es "waf" (http.handlers.waf) — "coraza_waf" es solo el nombre
+// de la directiva del Caddyfile, no vale como "handler" en config JSON.
 func wafHandler(directives string) (json.RawMessage, error) {
 	return json.Marshal(map[string]any{
-		"handler":    "coraza_waf",
+		"handler":    "waf",
 		"directives": directives,
 	})
 }
