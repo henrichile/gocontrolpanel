@@ -59,15 +59,10 @@ func (r *Runner) followEdgeLogs(ctx context.Context) error {
 
 	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	seen := 0
 	for sc.Scan() {
-		seen++
 		line := stripDockerLogPrefix(sc.Bytes())
 		var entry corazaLogLine
 		if err := json.Unmarshal(line, &entry); err != nil {
-			if seen <= 3 {
-				slog.Info("waf: línea no parseable como JSON", "raw", string(sc.Bytes())[:min(120, len(sc.Bytes()))])
-			}
 			continue // línea que no es JSON (banners de arranque, etc.): se ignora
 		}
 		if entry.Msg != corazaBlockMsg {
@@ -82,7 +77,6 @@ func (r *Runner) followEdgeLogs(ctx context.Context) error {
 			slog.Warn("waf: no se pudo guardar el bloqueo", "error", err)
 		}
 	}
-	slog.Info("waf: se terminó el stream de log de borde", "lines_seen", seen, "scan_err", sc.Err())
 	return sc.Err()
 }
 
