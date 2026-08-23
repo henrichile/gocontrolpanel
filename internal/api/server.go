@@ -53,6 +53,12 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/health", s.handleHealth)
 		// Endpoint que consulta Caddy antes de emitir un certificado on-demand.
 		r.Get("/tls/authorize", s.handleTLSAuthorize)
+		// Webhook de push (GitHub/GitLab/genérico): se autentica con el
+		// secreto propio del sitio, no con sesión.
+		r.Group(func(r chi.Router) {
+			r.Use(newRateLimiter(30, time.Minute).middleware)
+			r.Post("/webhooks/git/{siteID}", s.handleGitWebhook)
+		})
 
 		// --- Autenticado ---
 		r.Group(func(r chi.Router) {
@@ -112,6 +118,12 @@ func (s *Server) Handler() http.Handler {
 			// Dominios
 			r.Post("/sites/{siteID}/domains", s.handleAddDomain)
 			r.Delete("/domains/{domainID}", s.handleDeleteDomain)
+
+			// Deploy por Git
+			r.Get("/sites/{siteID}/git", s.handleGetSiteGit)
+			r.Post("/sites/{siteID}/git", s.handleConnectSiteGit)
+			r.Post("/sites/{siteID}/git/deploy", s.handleSiteGitDeploy)
+			r.Delete("/sites/{siteID}/git", s.handleDisconnectSiteGit)
 
 			// Bases de datos
 			r.Get("/accounts/{accountID}/databases", s.handleListDatabases)

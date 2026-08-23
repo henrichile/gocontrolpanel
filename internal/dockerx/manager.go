@@ -3,7 +3,9 @@
 package dockerx
 
 import (
+	"archive/tar"
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -245,8 +247,16 @@ func (m *Manager) Logs(ctx context.Context, name string, tail int, follow bool) 
 
 // Exec ejecuta un comando dentro del contenedor y devuelve salida y código.
 func (m *Manager) Exec(ctx context.Context, name string, cmd []string) (int, string, error) {
+	return m.ExecEnv(ctx, name, cmd, nil)
+}
+
+// ExecEnv es como Exec pero permite pasar variables de entorno adicionales al
+// proceso — lo usa el deploy por Git para fijar GIT_SSH_COMMAND sin tocar el
+// entorno del contenedor en sí.
+func (m *Manager) ExecEnv(ctx context.Context, name string, cmd []string, env []string) (int, string, error) {
 	created, err := m.cli.ContainerExecCreate(ctx, name, container.ExecOptions{
 		Cmd:          cmd,
+		Env:          env,
 		AttachStdout: true,
 		AttachStderr: true,
 		User:         "www-data",
@@ -273,6 +283,29 @@ func (m *Manager) Exec(ctx context.Context, name string, cmd []string) (int, str
 		return -1, sb.String(), err
 	}
 	return insp.ExitCode, sb.String(), nil
+}
+
+// WriteFile sube un único archivo al contenedor sin pasar por el bind mount
+// de /app — se usa para colocar de forma efímera la clave SSH de deploy
+// antes de un git pull y borrarla justo después (vía Exec).
+func (m *Manager) WriteFile(ctx context.Context, name, destPath string, content []byte, mode int64) error {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{
+		Name: strings.TrimPrefix(destPath, "/"),
+		Mode: mode,
+		Size: int64(len(content)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return err
+	}
+	if _, err := tw.Write(content); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return m.cli.CopyToContainer(ctx, name, "/", &buf, container.CopyToContainerOptions{})
 }
 
 // Stats toma una muestra puntual de CPU/memoria/red del contenedor.

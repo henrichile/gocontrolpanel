@@ -222,6 +222,70 @@ func (s *Store) DeleteCron(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// --- Deploy por Git ----------------------------------------------------------
+
+func (s *Store) CreateSiteGitConfig(ctx context.Context, c *models.SiteGitConfig) error {
+	return s.pool.QueryRow(ctx, `
+		INSERT INTO site_git_configs
+			(site_id, repo_url, branch, public_key, private_key_enc, webhook_secret, auto_deploy)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		RETURNING last_deploy_status, created_at, updated_at`,
+		c.SiteID, c.RepoURL, c.Branch, c.PublicKey, c.PrivateKeyEnc, c.WebhookSecret, c.AutoDeploy,
+	).Scan(&c.LastDeployStatus, &c.CreatedAt, &c.UpdatedAt)
+}
+
+func (s *Store) GetSiteGitConfig(ctx context.Context, siteID uuid.UUID) (*models.SiteGitConfig, error) {
+	var c models.SiteGitConfig
+	err := s.pool.QueryRow(ctx, `
+		SELECT site_id, repo_url, branch, public_key, private_key_enc, webhook_secret,
+		       auto_deploy, last_deploy_at, last_deploy_status, last_deploy_output,
+		       created_at, updated_at
+		FROM site_git_configs WHERE site_id=$1`, siteID).
+		Scan(&c.SiteID, &c.RepoURL, &c.Branch, &c.PublicKey, &c.PrivateKeyEnc, &c.WebhookSecret,
+			&c.AutoDeploy, &c.LastDeployAt, &c.LastDeployStatus, &c.LastDeployOutput,
+			&c.CreatedAt, &c.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &c, err
+}
+
+func (s *Store) UpdateSiteGitConfig(ctx context.Context, siteID uuid.UUID, repoURL, branch string, autoDeploy bool) error {
+	ct, err := s.pool.Exec(ctx, `
+		UPDATE site_git_configs
+		SET repo_url=$2, branch=$3, auto_deploy=$4, updated_at=now()
+		WHERE site_id=$1`, siteID, repoURL, branch, autoDeploy)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RecordGitDeploy(ctx context.Context, siteID uuid.UUID, status, output string) error {
+	if len(output) > 8000 {
+		output = output[:8000] + "\n… (truncado)"
+	}
+	_, err := s.pool.Exec(ctx, `
+		UPDATE site_git_configs
+		SET last_deploy_at=now(), last_deploy_status=$2, last_deploy_output=$3
+		WHERE site_id=$1`, siteID, status, output)
+	return err
+}
+
+func (s *Store) DeleteSiteGitConfig(ctx context.Context, siteID uuid.UUID) error {
+	ct, err := s.pool.Exec(ctx, `DELETE FROM site_git_configs WHERE site_id=$1`, siteID)
+	if err != nil {
+		return err
+	}
+	if ct.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // --- Auditoría -------------------------------------------------------------
 
 func (s *Store) Audit(ctx context.Context, e models.AuditEntry) {

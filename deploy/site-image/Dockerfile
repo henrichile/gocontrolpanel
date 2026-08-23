@@ -11,6 +11,13 @@
 ARG PHP_VERSION=8.4
 FROM dunglas/frankenphp:1-php${PHP_VERSION}
 
+# git + openssh-client: los usa el deploy automático por Git del panel
+# (clonar/actualizar el repo del sitio con su propia deploy key).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        openssh-client \
+    && rm -rf /var/lib/apt/lists/*
+
 # Extensiones habituales en hosting compartido (WordPress, Laravel, Magento…).
 RUN install-php-extensions \
         bcmath \

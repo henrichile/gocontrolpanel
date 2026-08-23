@@ -258,6 +258,20 @@ export interface FileEntry {
   mod_time: string
 }
 
+export interface SiteGitConfig {
+  site_id: string
+  repo_url: string
+  branch: string
+  public_key: string
+  webhook_url: string
+  webhook_secret: string
+  auto_deploy: boolean
+  last_deploy_at?: string
+  last_deploy_status: 'never' | 'running' | 'success' | 'failed'
+  last_deploy_output: string
+  created_at: string
+}
+
 export interface CronJob {
   id: string
   site_id: string

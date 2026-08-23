@@ -180,6 +180,21 @@ type CronJob struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+type SiteGitConfig struct {
+	SiteID           uuid.UUID  `json:"site_id"`
+	RepoURL          string     `json:"repo_url"`
+	Branch           string     `json:"branch"`
+	PublicKey        string     `json:"public_key"`
+	PrivateKeyEnc    []byte     `json:"-"`
+	WebhookSecret    string     `json:"-"`
+	AutoDeploy       bool       `json:"auto_deploy"`
+	LastDeployAt     *time.Time `json:"last_deploy_at,omitempty"`
+	LastDeployStatus string     `json:"last_deploy_status"`
+	LastDeployOutput string     `json:"last_deploy_output"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
 type AuditEntry struct {
 	ID            int64          `json:"id"`
 	ActorID       *uuid.UUID     `json:"actor_id,omitempty"`

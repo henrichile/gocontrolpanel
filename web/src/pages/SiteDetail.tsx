@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { api, tokens, type Account, type CronJob, type Site, type UsageSample } from '../api'
+import { api, tokens, type Account, type CronJob, type Site, type SiteGitConfig, type UsageSample } from '../api'
 import {
   Alert, Card, Empty, Meter, Spinner, Sparkline, StatusBadge,
   formatDate, useConfirm, useLiveStats,
@@ -8,7 +8,7 @@ import {
 import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
 
-type Tab = 'general' | 'dominios' | 'logs' | 'cron'
+type Tab = 'general' | 'dominios' | 'git' | 'logs' | 'cron'
 
 const ACTION_LABEL: Record<string, string> = {
   start: 'Sitio arrancado',
@@ -121,16 +121,17 @@ export default function SiteDetail() {
       {site.last_error && <Alert kind="error">{site.last_error}</Alert>}
 
       <div className="tabs">
-        {(['general', 'dominios', 'logs', 'cron'] as Tab[]).map((t) => (
+        {(['general', 'dominios', 'git', 'logs', 'cron'] as Tab[]).map((t) => (
           <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
             {t === 'general' ? 'General' : t === 'dominios' ? 'Dominios'
-              : t === 'logs' ? 'Registros' : 'Tareas cron'}
+              : t === 'git' ? 'Git' : t === 'logs' ? 'Registros' : 'Tareas cron'}
           </button>
         ))}
       </div>
 
       {tab === 'general' && <GeneralTab site={site} usage={usage} plan={plan} onSaved={reload} />}
       {tab === 'dominios' && <DomainsTab site={site} onChanged={reload} />}
+      {tab === 'git' && <GitTab siteID={site.id} />}
       {tab === 'logs' && <LogsTab siteID={site.id} />}
       {tab === 'cron' && <CronTab siteID={site.id} />}
     </>
@@ -312,6 +313,211 @@ function DomainsTab({ site, onChanged }: { site: Site; onChanged: () => Promise<
         </table>
       )}
     </Card>
+  )
+}
+
+function CopyField({ label, value, secret }: { label: string; value: string; secret?: boolean }) {
+  const toast = useToast()
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(`${label} copiado`)
+    } catch {
+      toast.error('No se pudo copiar')
+    }
+  }
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <code className="inline" style={{ flex: 1, overflow: 'auto', whiteSpace: secret ? 'nowrap' : 'pre-wrap' }}>
+          {secret ? '•'.repeat(24) : value}
+        </code>
+        <button type="button" className="sm ghost" onClick={() => void copy()}>Copiar</button>
+      </div>
+    </div>
+  )
+}
+
+const DEPLOY_STATUS_LABEL: Record<SiteGitConfig['last_deploy_status'], string> = {
+  never: 'Sin desplegar aún', running: 'Desplegando…', success: 'Desplegado', failed: 'Falló',
+}
+const DEPLOY_STATUS_CLASS: Record<SiteGitConfig['last_deploy_status'], string> = {
+  never: 'idle', running: 'warn', success: 'ok', failed: 'err',
+}
+
+function GitTab({ siteID }: { siteID: string }) {
+  const toast = useToast()
+  const { confirm, dialog } = useConfirm()
+  const [git, setGit] = useState<SiteGitConfig | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [repoURL, setRepoURL] = useState('')
+  const [branch, setBranch] = useState('main')
+  const [autoDeploy, setAutoDeploy] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [deploying, setDeploying] = useState(false)
+  const [error, setError] = useState('')
+  const [showOutput, setShowOutput] = useState(false)
+
+  const reload = useCallback(async () => {
+    const res = await api.get<{ connected: boolean; git?: SiteGitConfig }>(`/sites/${siteID}/git`)
+    setGit(res.git ?? null)
+    if (res.git) {
+      setBranch(res.git.branch)
+      setAutoDeploy(res.git.auto_deploy)
+    }
+  }, [siteID])
+
+  useEffect(() => {
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudo cargar la configuración de Git')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload])
+
+  async function connect(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    setSaving(true)
+    try {
+      const res = await api.post<{ git: SiteGitConfig; deploy_error?: string }>(`/sites/${siteID}/git`, {
+        repo_url: repoURL, branch, auto_deploy: autoDeploy,
+      })
+      setGit(res.git)
+      if (res.deploy_error) {
+        toast.error(`Repositorio conectado, pero el primer despliegue falló: ${res.deploy_error}`)
+      } else {
+        toast.success('Repositorio conectado y desplegado')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo conectar el repositorio')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function deployNow() {
+    setDeploying(true)
+    try {
+      const res = await api.post<{ git: SiteGitConfig; deploy_error?: string }>(`/sites/${siteID}/git/deploy`)
+      setGit(res.git)
+      if (res.deploy_error) {
+        toast.error(`El despliegue falló: ${res.deploy_error}`)
+      } else {
+        toast.success('Sitio desplegado')
+      }
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo desplegar'))
+    } finally {
+      setDeploying(false)
+    }
+  }
+
+  async function disconnect() {
+    const ok = await confirm('Se quitará la conexión con el repositorio (no se tocan los archivos ya desplegados).')
+    if (!ok) return
+    try {
+      await api.del(`/sites/${siteID}/git`)
+      setGit(null)
+      toast.success('Repositorio desconectado')
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo desconectar'))
+    }
+  }
+
+  if (loading) return <Spinner />
+
+  if (!git) {
+    return (
+      <Card title="Conectar un repositorio">
+        {dialog}
+        {error && <Alert kind="error">{error}</Alert>}
+        <p className="muted" style={{ marginTop: 0 }}>
+          El panel genera una clave SSH propia para este sitio; solo tienes que agregarla como
+          "Deploy Key" (de solo lectura) en tu repositorio — no necesitas subir ninguna clave tuya.
+        </p>
+        <form onSubmit={connect}>
+          <div className="row">
+            <div className="field">
+              <label htmlFor="repo-url">URL del repositorio (SSH)</label>
+              <input id="repo-url" placeholder="git@github.com:usuario/repo.git" value={repoURL} required
+                     onChange={(e) => setRepoURL(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="branch">Rama</label>
+              <input id="branch" value={branch} onChange={(e) => setBranch(e.target.value)} />
+            </div>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 400 }}>
+            <input type="checkbox" checked={autoDeploy} onChange={(e) => setAutoDeploy(e.target.checked)} />
+            Desplegar automáticamente en cada push (webhook)
+          </label>
+          <div className="actions" style={{ marginTop: 14 }}>
+            <button className="primary" disabled={saving}>
+              <Icon name="redeploy" size={15} />{saving ? 'Conectando…' : 'Conectar y desplegar'}
+            </button>
+          </div>
+        </form>
+      </Card>
+    )
+  }
+
+  return (
+    <>
+      {dialog}
+      <Card
+        title="Repositorio conectado"
+        actions={
+          <div className="actions">
+            <button className="sm primary" disabled={deploying} onClick={() => void deployNow()}>
+              <Icon name="redeploy" size={14} />{deploying ? 'Desplegando…' : 'Desplegar ahora'}
+            </button>
+            <button className="sm ghost danger" onClick={() => void disconnect()}>
+              <Icon name="trash" size={14} />Desconectar
+            </button>
+          </div>
+        }
+      >
+        <div className="row">
+          <div className="field">
+            <label>Repositorio</label>
+            <code className="inline">{git.repo_url}</code>
+          </div>
+          <div className="field">
+            <label>Rama</label>
+            <code className="inline">{git.branch}</code>
+          </div>
+        </div>
+
+        <CopyField label="Clave pública (Deploy Key)" value={git.public_key} />
+        <p className="muted" style={{ marginTop: -8 }}>
+          Agrégala como Deploy Key de solo lectura en la configuración del repositorio.
+        </p>
+
+        <CopyField label="URL del webhook" value={git.webhook_url} />
+        <CopyField label="Secreto del webhook" value={git.webhook_secret} secret />
+        <p className="muted" style={{ marginTop: -8 }}>
+          Configura un webhook de push con esta URL en GitHub (secreto) o GitLab (token) para
+          desplegar automáticamente en cada push a <code className="inline">{git.branch}</code>.
+        </p>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+          <span className={`badge ${DEPLOY_STATUS_CLASS[git.last_deploy_status]}`}>
+            <span className="dot" />{DEPLOY_STATUS_LABEL[git.last_deploy_status]}
+          </span>
+          <span className="muted" style={{ fontSize: 13 }}>{formatDate(git.last_deploy_at)}</span>
+          {git.last_deploy_output && (
+            <button type="button" className="sm ghost" onClick={() => setShowOutput((v) => !v)}>
+              {showOutput ? 'Ocultar salida' : 'Ver salida'}
+            </button>
+          )}
+        </div>
+        {showOutput && git.last_deploy_output && (
+          <pre className="console" style={{ marginTop: 10, height: 'auto', maxHeight: 280 }}>
+            {git.last_deploy_output}
+          </pre>
+        )}
+      </Card>
+    </>
   )
 }
 
