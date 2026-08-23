@@ -50,21 +50,29 @@ func (r *Runner) wafLogLoop(ctx context.Context) {
 func (r *Runner) followEdgeLogs(ctx context.Context) error {
 	rc, err := r.svc.Docker().Logs(ctx, r.cfg.EdgeContainerName, 0, true)
 	if err != nil {
+		slog.Warn("waf: no se pudo abrir el log de borde", "container", r.cfg.EdgeContainerName, "error", err)
 		return err
 	}
 	defer rc.Close()
+	slog.Info("waf: siguiendo el log de borde", "container", r.cfg.EdgeContainerName)
 
 	sc := bufio.NewScanner(rc)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	seen := 0
 	for sc.Scan() {
+		seen++
 		line := stripDockerLogFrame(sc.Bytes())
 		var entry corazaLogLine
 		if err := json.Unmarshal(line, &entry); err != nil {
+			if seen <= 3 {
+				slog.Info("waf: línea no parseable como JSON", "raw", string(sc.Bytes())[:min(120, len(sc.Bytes()))])
+			}
 			continue // línea que no es JSON (banners de arranque, etc.): se ignora
 		}
 		if entry.Msg != corazaBlockMsg {
 			continue
 		}
+		slog.Info("waf: bloqueo detectado", "hostname", entry.Hostname, "uri", entry.URI)
 		block := &models.WAFBlock{
 			ClientIP: entry.ClientIP, Hostname: entry.Hostname,
 			URI: entry.URI, UniqueID: entry.UniqueID, RawJSON: string(line),
@@ -73,6 +81,7 @@ func (r *Runner) followEdgeLogs(ctx context.Context) error {
 			slog.Warn("waf: no se pudo guardar el bloqueo", "error", err)
 		}
 	}
+	slog.Info("waf: se terminó el stream de log de borde", "lines_seen", seen, "scan_err", sc.Err())
 	return sc.Err()
 }
 
