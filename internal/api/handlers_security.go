@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -40,6 +41,7 @@ func (s *Server) handleGetFirewall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, err := client.Status(r.Context())
+	slog.Info("firewall status", "raw", raw, "err", err, "rules_parsed", len(hostctl.ParseStatus(raw)))
 	if err != nil {
 		httpx.OK(w, firewallResponse{Configured: true, Error: err.Error(), ProtectedPort: s.cfg.SSHPort})
 		return
