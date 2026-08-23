@@ -174,6 +174,8 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/system/audit", s.handleAudit)
 				r.Get("/system/caddy", s.handleCaddyConfig)
 				r.Post("/system/caddy/sync", s.handleCaddySync)
+				r.Get("/system/security", s.handleGetSecuritySettings)
+				r.Put("/system/security", s.handleUpdateSecuritySettings)
 			})
 		})
 	})

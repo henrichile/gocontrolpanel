@@ -165,7 +165,11 @@ func (s *Service) PruneOldBackups(ctx context.Context, accountID uuid.UUID) erro
 	if err != nil {
 		return err
 	}
-	cutoff := time.Now().AddDate(0, 0, -s.cfg.BackupRetentionDays)
+	settings, err := s.st.GetSystemSettings(ctx)
+	if err != nil {
+		return err
+	}
+	cutoff := time.Now().AddDate(0, 0, -settings.BackupRetentionDays)
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {

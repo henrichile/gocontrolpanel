@@ -526,6 +526,11 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 		}
 	}
 
+	settings, err := s.st.GetSystemSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("leyendo la configuración de seguridad: %w", err)
+	}
+
 	panelUpstream := "gocp-panel" + portOf(s.cfg.ListenAddr)
 	cfg, err := caddyapi.Build(routes, caddyapi.BuildOptions{
 		ACMEEmail:     s.cfg.CaddyEmail,
@@ -536,9 +541,9 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 		// certificados de dominios nuevos dejan de emitirse.
 		OnDemandAskURL: "http://" + panelUpstream + "/api/v1/tls/authorize",
 
-		WAFEnabled:         s.cfg.WAFEnabled,
+		WAFEnabled:         settings.WAFEnabled,
 		CorazaDirectives:   s.cfg.CorazaDirectives,
-		RateLimitPerMinute: s.cfg.RateLimitPerMinute,
+		RateLimitPerMinute: settings.RateLimitPerMinute,
 	})
 	if err != nil {
 		return err

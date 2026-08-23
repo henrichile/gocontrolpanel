@@ -33,13 +33,13 @@ type Config struct {
 	CaddyAdminURL string
 	CaddyEmail    string // e-mail para ACME/Let's Encrypt
 
-	// WAF (Coraza + OWASP CRS) y rate limiting en el borde. Requiere que la
-	// imagen de "edge" se haya compilado con esos plugins (ver
-	// deploy/edge/Dockerfile); si se activa contra un Caddy sin ellos, el
-	// /load de la config falla y SyncCaddy empieza a devolver error.
-	WAFEnabled         bool
-	CorazaDirectives   string
-	RateLimitPerMinute int
+	// Reglas del WAF (Coraza + OWASP CRS). El on/off y el rate limit viven
+	// en la base de datos (system_settings, editable desde el panel); esto
+	// se queda como variable de entorno porque son reglas avanzadas que no
+	// se tocan desde la UI. Requiere que la imagen de "edge" se haya
+	// compilado con esos plugins (ver deploy/edge/Dockerfile); si el WAF se
+	// activa contra un Caddy sin ellos, el /load de la config falla.
+	CorazaDirectives string
 
 	// Docker
 	DockerHost       string
@@ -53,9 +53,6 @@ type Config struct {
 	MySQLDSN           string
 	MySQLHost          string
 	MySQLContainerName string // nombre real del contenedor, para docker exec (mysqldump)
-
-	// Backups automáticos (archivos + bases de datos) por cuenta
-	BackupRetentionDays int
 
 	// SFTP gestionado (sftpgo): un usuario virtual por cuenta, con su home
 	// encadenado (chroot) a la carpeta de esa cuenta en el host.
@@ -93,12 +90,10 @@ func Load() (*Config, error) {
 		CaddyAdminURL:    env("GOCP_CADDY_ADMIN_URL", "http://localhost:2019"),
 		CaddyEmail:       env("GOCP_CADDY_EMAIL", ""),
 
-		WAFEnabled: envBool("GOCP_WAF_ENABLED", false),
 		CorazaDirectives: env("GOCP_CORAZA_DIRECTIVES",
 			"Include /etc/coraza-crs/crs-setup.conf\n"+
 				"Include /etc/coraza-crs/rules/*.conf\n"+
 				"SecRuleEngine On"),
-		RateLimitPerMinute: envInt("GOCP_RATE_LIMIT_PER_MINUTE", 240),
 		DockerHost:       env("GOCP_DOCKER_HOST", "unix:///var/run/docker.sock"),
 		DockerNetwork:    env("GOCP_DOCKER_NETWORK", "gocp_sites"),
 		SiteImagePrefix:  env("GOCP_SITE_IMAGE_PREFIX", "gocp/frankenphp"),
@@ -108,8 +103,6 @@ func Load() (*Config, error) {
 		MySQLDSN:           env("GOCP_MYSQL_DSN", ""),
 		MySQLHost:          env("GOCP_MYSQL_HOST", "mysql"),
 		MySQLContainerName: env("GOCP_MYSQL_CONTAINER_NAME", "gocp-mysql"),
-
-		BackupRetentionDays: envInt("GOCP_BACKUP_RETENTION_DAYS", 14),
 
 		SFTPAdminURL:      env("GOCP_SFTP_ADMIN_URL", "http://sftp:8080"),
 		SFTPAdminUser:     env("GOCP_SFTP_ADMIN_USER", ""),

@@ -25,7 +25,7 @@ export default function MyAccount() {
   if (accounts === null) return <Spinner />
 
   if (accounts.length === 1) {
-    return <Navigate to={`/cuentas/${accounts[0].id}`} replace />
+    return <Navigate to={`/panel/${accounts[0].id}`} replace />
   }
 
   if (accounts.length === 0) {
@@ -54,7 +54,7 @@ export default function MyAccount() {
       </div>
       <div className="stat-grid">
         {accounts.map((a) => (
-          <Link key={a.id} to={`/cuentas/${a.id}`} style={{ textDecoration: 'none' }}>
+          <Link key={a.id} to={`/panel/${a.id}`} style={{ textDecoration: 'none' }}>
             <div className="stat">
               <div className="label">{a.primary_domain}</div>
               <div className="value" style={{ fontSize: 18 }}>{a.system_user}</div>

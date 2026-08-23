@@ -5,6 +5,7 @@ import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
 import AccountDetail from './pages/AccountDetail'
+import AccountPanel from './pages/AccountPanel'
 import MyAccount from './pages/MyAccount'
 import Profile from './pages/Profile'
 import SiteDetail from './pages/SiteDetail'
@@ -12,6 +13,11 @@ import Users from './pages/Users'
 import Plans from './pages/Plans'
 import System from './pages/System'
 
+// El panel tiene dos ambientes separados: "Administración del servidor"
+// (admin/reseller: cuentas, usuarios, planes, sistema) y "Panel de
+// hosting" (dueño de una cuenta: sus sitios, archivos, BD, SFTP, backups).
+// Un mismo usuario nunca ve las dos navegaciones a la vez — la de admin
+// existe solo para quien administra el servidor.
 export default function App() {
   const { user, loading, isClient } = useAuth()
 
@@ -26,13 +32,18 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/mi-cuenta" element={<MyAccount />} />
           <Route path="/perfil" element={<Profile />} />
-          {/* La tabla de cuentas es una vista de administración (estilo WHM);
-              un cliente entra directo a la suya por /mi-cuenta. */}
+          <Route path="/panel/:accountID" element={<AccountPanel />} />
+          {/* Ambiente de administración del servidor: no existe para un
+              cliente, que siempre entra por /mi-cuenta → /panel/:id. */}
           <Route path="/cuentas" element={isClient ? <Navigate to="/mi-cuenta" replace /> : <Accounts />} />
-          <Route path="/cuentas/:accountID" element={<AccountDetail />} />
+          <Route
+            path="/cuentas/:accountID"
+            element={isClient ? <Navigate to="/mi-cuenta" replace /> : <AccountDetail />}
+          />
           {/* Un sitio siempre se administra dentro de su cuenta; esta ruta
               solo existe para llegar al detalle desde ahí (o desde el
-              resumen), no hay un listado de sitios independiente. */}
+              resumen), no hay un listado de sitios independiente. Es
+              agnóstica de ambiente: la usan tanto admin como cliente. */}
           <Route path="/sitios/:siteID" element={<SiteDetail />} />
           <Route path="/usuarios" element={<Users />} />
           <Route path="/planes" element={<Plans />} />
@@ -56,19 +67,25 @@ function Sidebar() {
 
       <nav className="nav">
         <NavLink to="/" end>Resumen</NavLink>
-        {/* Cuenta y sitio son un solo ítem de menú: 1 cuenta = 1 sitio
-            principal. Los sitios adicionales que permita el plan, y sus
-            dominios/subdominios, se crean y administran dentro de la propia
-            cuenta (pestaña "Sitios" de AccountDetail) — no como un listado
+
+        {/* Ambiente "Panel de hosting": lo que ve un cliente. Cuenta y sitio
+            son un solo ítem de menú (1 cuenta = 1 sitio principal); los
+            sitios adicionales que permita el plan, y sus dominios, se crean
+            y administran dentro de la propia cuenta, no como listado
             aparte. */}
-        {isClient ? (
-          <NavLink to="/mi-cuenta">Mi cuenta</NavLink>
-        ) : (
-          <NavLink to="/cuentas">Cuentas</NavLink>
+        {isClient && <NavLink to="/mi-cuenta">Mi hosting</NavLink>}
+
+        {/* Ambiente "Administración del servidor": no existe para un
+            cliente — es exclusivo de quien administra el servidor. */}
+        {isReseller && (
+          <>
+            <div className="nav-section">Administración del servidor</div>
+            <NavLink to="/cuentas">Cuentas</NavLink>
+            <NavLink to="/usuarios">Usuarios</NavLink>
+            {isAdmin && <NavLink to="/planes">Planes</NavLink>}
+            {isAdmin && <NavLink to="/sistema">Sistema</NavLink>}
+          </>
         )}
-        {isReseller && <NavLink to="/usuarios">Usuarios</NavLink>}
-        {isAdmin && <NavLink to="/planes">Planes</NavLink>}
-        {isAdmin && <NavLink to="/sistema">Sistema</NavLink>}
       </nav>
 
       <div className="sidebar-footer">

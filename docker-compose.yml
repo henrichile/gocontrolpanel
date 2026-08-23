@@ -32,9 +32,9 @@ services:
     # Para activar el WAF (Coraza + OWASP CRS) hay que compilar Caddy con
     # xcaddy: cambia la línea de arriba por "build: deploy/edge", corre
     # `docker compose build edge` a mano y confirma que arranca bien ANTES
-    # de poner GOCP_WAF_ENABLED=true — ese build es pesado (descarga xcaddy
-    # + el ruleset de OWASP) y no debe ser parte del "docker compose up"
-    # normal de cada actualización.
+    # de activar el WAF desde Sistema → Seguridad en el panel — ese build es
+    # pesado (descarga xcaddy + el ruleset de OWASP) y no debe ser parte del
+    # "docker compose up" normal de cada actualización.
     container_name: gocp-edge
     restart: unless-stopped
     ports:
@@ -85,10 +85,7 @@ services:
       GOCP_JWT_SECRET: "${GOCP_JWT_SECRET:?genera uno con: openssl rand -hex 32}"
       GOCP_CADDY_ADMIN_URL: http://edge:2019
       GOCP_CADDY_EMAIL: ${GOCP_CADDY_EMAIL:-}
-      GOCP_WAF_ENABLED: ${GOCP_WAF_ENABLED:-false}
-      GOCP_RATE_LIMIT_PER_MINUTE: ${GOCP_RATE_LIMIT_PER_MINUTE:-240}
       GOCP_MYSQL_CONTAINER_NAME: gocp-mysql
-      GOCP_BACKUP_RETENTION_DAYS: ${GOCP_BACKUP_RETENTION_DAYS:-14}
       GOCP_DOCKER_HOST: unix:///var/run/docker.sock
       GOCP_DOCKER_NETWORK: gocontrolpanel_sites
       GOCP_SITE_IMAGE_PREFIX: gocp/frankenphp

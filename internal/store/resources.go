@@ -286,6 +286,25 @@ func (s *Store) DeleteSiteGitConfig(ctx context.Context, siteID uuid.UUID) error
 	return nil
 }
 
+// --- Configuración de seguridad del servidor --------------------------------
+
+func (s *Store) GetSystemSettings(ctx context.Context) (*models.SystemSettings, error) {
+	var st models.SystemSettings
+	err := s.pool.QueryRow(ctx, `
+		SELECT waf_enabled, rate_limit_per_minute, backup_retention_days, updated_at
+		FROM system_settings WHERE id`).
+		Scan(&st.WAFEnabled, &st.RateLimitPerMinute, &st.BackupRetentionDays, &st.UpdatedAt)
+	return &st, err
+}
+
+func (s *Store) UpdateSystemSettings(ctx context.Context, wafEnabled bool, rateLimitPerMinute, backupRetentionDays int) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE system_settings
+		SET waf_enabled=$1, rate_limit_per_minute=$2, backup_retention_days=$3, updated_at=now()
+		WHERE id`, wafEnabled, rateLimitPerMinute, backupRetentionDays)
+	return err
+}
+
 // --- Auditoría -------------------------------------------------------------
 
 func (s *Store) Audit(ctx context.Context, e models.AuditEntry) {

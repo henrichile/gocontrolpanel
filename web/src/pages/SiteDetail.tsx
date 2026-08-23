@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, tokens, type Account, type CronJob, type Site, type SiteGitConfig, type UsageSample } from '../api'
+import { useAuth } from '../auth'
 import {
   Alert, Card, Empty, Meter, Spinner, Sparkline, StatusBadge,
   formatDate, useConfirm, useLiveStats,
@@ -20,6 +21,7 @@ const ACTION_LABEL: Record<string, string> = {
 export default function SiteDetail() {
   const { siteID } = useParams()
   const toast = useToast()
+  const { isClient } = useAuth()
   const [site, setSite] = useState<Site | null>(null)
   const [usage, setUsage] = useState<UsageSample[]>([])
   const [plan, setPlan] = useState<Account['plan']>(undefined)
@@ -73,7 +75,8 @@ export default function SiteDetail() {
     try {
       const accountID = site?.account_id
       await api.del(`/sites/${siteID}?delete_files=true`)
-      window.location.href = accountID ? `/cuentas/${accountID}` : '/'
+      const base = isClient ? '/panel' : '/cuentas'
+      window.location.href = accountID ? `${base}/${accountID}` : '/'
     } catch (err) {
       toast.error(errorMessage(err, 'No se pudo eliminar el sitio'))
     }

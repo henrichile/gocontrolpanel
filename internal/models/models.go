@@ -182,6 +182,15 @@ type CronJob struct {
 	CreatedAt    time.Time  `json:"created_at"`
 }
 
+// SystemSettings es la única fila de configuración de seguridad del
+// servidor, editable desde el ambiente de administración.
+type SystemSettings struct {
+	WAFEnabled          bool      `json:"waf_enabled"`
+	RateLimitPerMinute  int       `json:"rate_limit_per_minute"`
+	BackupRetentionDays int       `json:"backup_retention_days"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
 type SiteGitConfig struct {
 	SiteID           uuid.UUID  `json:"site_id"`
 	RepoURL          string     `json:"repo_url"`
