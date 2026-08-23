@@ -137,7 +137,7 @@ func (s *Service) BackupAccountDatabases(ctx context.Context, accountID uuid.UUI
 			return paths, fmt.Errorf("mysqldump de %s terminó con código %d: %s", db.DBName, exit, out)
 		}
 		data, err := s.docker.ReadFile(ctx, s.cfg.MySQLContainerName, tmpPath)
-		_, _ = s.docker.ExecAs(ctx, s.cfg.MySQLContainerName, []string{"rm", "-f", tmpPath}, "", nil)
+		_, _, _ = s.docker.ExecAs(ctx, s.cfg.MySQLContainerName, []string{"rm", "-f", tmpPath}, "", nil)
 		if err != nil {
 			return paths, fmt.Errorf("recuperando el dump de %s: %w", db.DBName, err)
 		}
