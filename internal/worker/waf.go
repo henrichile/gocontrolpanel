@@ -2,6 +2,7 @@ package worker
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -61,7 +62,7 @@ func (r *Runner) followEdgeLogs(ctx context.Context) error {
 	seen := 0
 	for sc.Scan() {
 		seen++
-		line := stripDockerLogFrame(sc.Bytes())
+		line := stripDockerLogPrefix(sc.Bytes())
 		var entry corazaLogLine
 		if err := json.Unmarshal(line, &entry); err != nil {
 			if seen <= 3 {
@@ -85,12 +86,18 @@ func (r *Runner) followEdgeLogs(ctx context.Context) error {
 	return sc.Err()
 }
 
-// stripDockerLogFrame quita el framing de 8 bytes que antepone el daemon de
-// Docker a cada línea de log cuando el contenedor no usa TTY (mismo formato
-// que ya maneja stripFrame en internal/api/handlers_sites.go).
-func stripDockerLogFrame(b []byte) []byte {
+// stripDockerLogPrefix quita dos cosas que Docker antepone a cada línea:
+// el framing de 8 bytes del multiplexado stdout/stderr (mismo formato que
+// stripFrame en internal/api/handlers_sites.go), y el timestamp RFC3339Nano
+// que antepone porque Logs() pide Timestamps:true (para mostrarlo en el
+// visor de logs de un sitio) — acá solo estorba para parsear el JSON, así
+// que se salta todo hasta el primer '{'.
+func stripDockerLogPrefix(b []byte) []byte {
 	if len(b) >= 8 && (b[0] == 1 || b[0] == 2) && b[1] == 0 {
-		return b[8:]
+		b = b[8:]
+	}
+	if i := bytes.IndexByte(b, '{'); i >= 0 {
+		return b[i:]
 	}
 	return b
 }
