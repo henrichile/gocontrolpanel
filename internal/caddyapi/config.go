@@ -110,6 +110,13 @@ type BuildOptions struct {
 	// on-demand.
 	WebmailHost     string
 	WebmailUpstream string
+	// Hostname del servidor de correo (docker-mailserver) — no tiene ruta
+	// HTTP propia (Caddy no le hace de proxy, nada le habla por HTTP), pero
+	// SÍ necesita estar en la lista de subjects: docker-mailserver reutiliza
+	// el certificado que Caddy emite/renueva aquí para servir IMAP/SMTP con
+	// TLS (ver SSL_CERT_PATH/SSL_KEY_PATH en docker-compose.yml). Sin esto,
+	// Caddy nunca pide el certificado y el mailserver no arranca.
+	MailHostname string
 	// Página estática que se sirve cuando un sitio está detenido.
 	MaintenanceMessage string
 
@@ -186,6 +193,9 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 	}
 	if opt.WebmailHost != "" {
 		subjects = append(subjects, opt.WebmailHost)
+	}
+	if opt.MailHostname != "" {
+		subjects = append(subjects, opt.MailHostname)
 	}
 	for _, r := range sorted {
 		if len(r.Hosts) == 0 {

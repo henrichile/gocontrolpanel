@@ -722,6 +722,12 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 	if s.cfg.MailEnabled {
 		buildOpts.WebmailHost = WebmailHost(s.cfg.PublicURL)
 		buildOpts.WebmailUpstream = s.cfg.MailWebmailUpstream
+		// docker-mailserver no tiene ruta HTTP propia, pero necesita que
+		// Caddy le emita/renueve el certificado de este hostname (lo lee del
+		// volumen compartido caddy_data) para poder servir IMAP/SMTP con TLS.
+		if s.mail != nil {
+			buildOpts.MailHostname = s.mail.Hostname()
+		}
 	}
 	cfg, err := caddyapi.Build(routes, buildOpts)
 	if err != nil {
