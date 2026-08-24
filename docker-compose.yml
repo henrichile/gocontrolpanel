@@ -290,8 +290,12 @@ services:
       - mailserver
     environment:
       ROUNDCUBEMAIL_DB_TYPE: sqlite
-      ROUNDCUBEMAIL_DEFAULT_HOST: tls://mailserver
+      # "ssl://" = TLS implícito (puerto 993, IMAPS); "tls://" sería STARTTLS
+      # (puerto 143) — mezclarlos con el puerto equivocado rompe la conexión
+      # ("ha fallado la conexión al servidor de almacenamiento").
+      ROUNDCUBEMAIL_DEFAULT_HOST: ssl://mailserver
       ROUNDCUBEMAIL_DEFAULT_PORT: 993
+      # 587 sí es STARTTLS (submission), así que "tls://" es correcto aquí.
       ROUNDCUBEMAIL_SMTP_SERVER: tls://mailserver
       ROUNDCUBEMAIL_SMTP_PORT: 587
       # Sin ":?": Docker Compose interpola las variables de TODOS los
