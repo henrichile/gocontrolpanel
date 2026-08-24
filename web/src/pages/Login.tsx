@@ -43,7 +43,7 @@ export default function Login() {
     return (
       <div className="login-wrap">
         <form className="login-card" onSubmit={onVerify}>
-          <span className="brand-mark">Go</span>
+          <img src="/img/logo-azul.png" alt="CloudControl Panel" className="brand-logo" />
           <h1>Verificación en dos pasos</h1>
           <p className="sub">Escribe el código de tu app de autenticación</p>
 
@@ -78,7 +78,7 @@ export default function Login() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={onSubmit}>
-        <span className="brand-mark">Go</span>
+        <img src="/img/logo-azul.png" alt="CloudControl Panel" className="brand-logo" />
         <h1>GoControlPanel</h1>
         <p className="sub">Administración de hosting sobre FrankenPHP y Caddy</p>
 

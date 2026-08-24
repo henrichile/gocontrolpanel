@@ -64,8 +64,7 @@ function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">Go</span>
-        <span>ControlPanel</span>
+        <img src="/img/logo-white.png" alt="CloudControl Panel" className="brand-logo" />
       </div>
 
       <nav className="nav">
