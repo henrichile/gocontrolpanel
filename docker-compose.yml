@@ -236,7 +236,8 @@ services:
   # del servidor apuntando a GOCP_MAIL_HOSTNAME y tenga el puerto 25 saliente
   # abierto — install.sh solo levanta este perfil si el operador lo confirmó.
   mailserver:
-    image: docker.io/mailserver/docker-mailserver:latest
+    # Registro oficial del proyecto (GitHub Container Registry, no Docker Hub).
+    image: ghcr.io/docker-mailserver/docker-mailserver:latest
     container_name: gocp-mailserver
     hostname: ${GOCP_MAIL_HOSTNAME:-}
     restart: unless-stopped
@@ -279,7 +280,8 @@ services:
       retries: 5
 
   roundcube:
-    image: roundcube/roundcube:latest
+    # El repositorio de Docker Hub se llama "roundcubemail", no "roundcube".
+    image: roundcube/roundcubemail:latest
     container_name: gocp-roundcube
     restart: unless-stopped
     profiles: ["mail"]
