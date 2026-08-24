@@ -188,6 +188,7 @@ func (s *Server) Handler() http.Handler {
 				r.Put("/system/security", s.handleUpdateSecuritySettings)
 				r.Get("/system/security/firewall", s.handleGetFirewall)
 				r.Post("/system/security/firewall/rules", s.handleSetFirewallRule)
+				r.Put("/system/security/firewall/enabled", s.handleSetFirewallEnabled)
 				r.Post("/system/security/firewall/sync-docker", s.handleSyncDockerFirewall)
 				r.Get("/system/security/waf-blocks", s.handleListWAFBlocks)
 				r.Get("/system/security/waf-blocks/stream", s.handleStreamWAFBlocks)

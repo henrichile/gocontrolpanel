@@ -12,10 +12,19 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
 	"golang.org/x/crypto/ssh"
+)
+
+// reOrigin/reComment son la misma lista blanca que valida el script del host
+// (ver install.sh) — se repite acá para poder rechazar de entrada, en vez de
+// hacerle perder un viaje SSH a algo que el host va a rechazar igual.
+var (
+	reOrigin  = regexp.MustCompile(`^[0-9a-fA-F:.]+(/[0-9]{1,3})?$`)
+	reComment = regexp.MustCompile(`^[A-Za-z0-9 .,_/()-]{0,80}$`)
 )
 
 var (
@@ -101,14 +110,31 @@ func (c *Client) run(ctx context.Context, cmd string) (string, error) {
 	}
 }
 
-// Status devuelve la salida cruda de "ufw status verbose" en el host.
+// Status devuelve la salida cruda normalizada por el script del host (ver
+// install.sh) para "status": estado global + una regla por línea.
 func (c *Client) Status(ctx context.Context) (string, error) {
 	return c.run(ctx, "status")
 }
 
-// SetRule abre ("allow") o cierra ("deny") un puerto. Nunca se manda un
-// "deny" sobre el puerto protegido — ni siquiera se intenta, aunque el
-// script del host también lo rechazaría.
+// SetEnabled activa o desactiva el firewall del host por completo.
+func (c *Client) SetEnabled(ctx context.Context, enabled bool) (string, error) {
+	if enabled {
+		return c.run(ctx, "enable")
+	}
+	return c.run(ctx, "disable")
+}
+
+// SetRule abre ("allow") o cierra ("deny") un puerto para cualquier origen,
+// sin comentario — es la forma simple que usan los presets y el
+// sincronizado automático con Docker. A propósito NO delega en SetRuleFull:
+// "deny" acá manda la forma vieja del script ("delete allow"), que quita la
+// regla "allow" existente en vez de insertar una "deny" nueva delante. Si
+// delegara en SetRuleFull (que inserta un "deny" de máxima prioridad),
+// alternar un preset apagado→encendido dejaría el "deny" insertado tapando
+// el "allow" agregado después — el puerto quedaría marcado "permitido" en la
+// lista pero seguiría bloqueado en los hechos. Nunca se manda un "deny"
+// sobre el puerto protegido — ni siquiera se intenta, aunque el script del
+// host también lo rechazaría.
 func (c *Client) SetRule(ctx context.Context, action string, port int, proto string) (string, error) {
 	if action != "allow" && action != "deny" {
 		return "", fmt.Errorf("acción inválida: %q", action)
@@ -124,4 +150,43 @@ func (c *Client) SetRule(ctx context.Context, action string, port int, proto str
 		return "", ErrProtectedPort
 	}
 	return c.run(ctx, fmt.Sprintf("%s %d %s", action, port, proto))
+}
+
+// SetRuleFull agrega una regla nueva con origen (CIDR, o "" para
+// "cualquiera") y comentario libres — lo que usa el formulario de "Añadir
+// regla" del panel. A diferencia de SetRule, "deny" acá SÍ inserta una regla
+// explícita (con prioridad máxima) en vez de borrar un "allow" existente:
+// tiene sentido propio porque el origen puede ser específico (bloquear una
+// IP puntual sin tocar la regla "allow" más amplia que sigue permitiendo al
+// resto).
+func (c *Client) SetRuleFull(ctx context.Context, action string, port int, proto, origin, comment string) (string, error) {
+	if action != "allow" && action != "deny" {
+		return "", fmt.Errorf("acción inválida: %q", action)
+	}
+	if port < 1 || port > 65535 {
+		return "", fmt.Errorf("puerto inválido: %d", port)
+	}
+	proto = strings.ToLower(proto)
+	if proto != "tcp" && proto != "udp" {
+		return "", fmt.Errorf("protocolo inválido: %q", proto)
+	}
+	if action == "deny" && port == c.protectedPort {
+		return "", ErrProtectedPort
+	}
+	origin = strings.TrimSpace(origin)
+	if origin == "" {
+		origin = "any"
+	}
+	if origin != "any" && !reOrigin.MatchString(origin) {
+		return "", fmt.Errorf("origen inválido: %q (debe ser \"any\" o una IP/CIDR)", origin)
+	}
+	comment = strings.TrimSpace(comment)
+	if comment != "" && !reComment.MatchString(comment) {
+		return "", fmt.Errorf("comentario inválido: solo letras, números, espacios y . , _ / ( ) -")
+	}
+	cmd := fmt.Sprintf("rule %s %d %s %s", action, port, proto, origin)
+	if comment != "" {
+		cmd += " " + comment
+	}
+	return c.run(ctx, cmd)
 }

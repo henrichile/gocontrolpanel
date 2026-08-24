@@ -356,10 +356,16 @@ export interface FirewallRule {
   proto: 'tcp' | 'udp'
   action: 'allow' | 'deny'
   from: string
+  comment?: string
 }
 
 export interface FirewallStatus {
   configured: boolean
+  // Solo confiar en `enabled` si `enabled_known` es true: un host cuyo
+  // script todavía no se actualizó (falta volver a correr install.sh en el
+  // servidor) no manda el estado global.
+  enabled: boolean
+  enabled_known?: boolean
   rules?: FirewallRule[]
   // Puertos que Docker ya publica al host (borde, SFTP, correo) ahora
   // mismo, detectados por el backend inspeccionando los contenedores —

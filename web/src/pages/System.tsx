@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api, tokens, type AuditEntry, type FirewallStatus, type SecurityStatus, type SystemInfo, type WAFBlock,
 } from '../api'
-import { Alert, Card, Empty, Spinner, Stat, formatDate, formatUptime } from '../components'
+import { Alert, Card, Empty, Modal, Spinner, Stat, formatDate, formatUptime } from '../components'
 import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
 
@@ -290,11 +290,9 @@ function FirewallCard() {
   const toast = useToast()
   const [status, setStatus] = useState<FirewallStatus | null>(null)
   const [loading, setLoading] = useState(true)
-  const [action, setAction] = useState<'allow' | 'deny'>('allow')
-  const [port, setPort] = useState('')
-  const [proto, setProto] = useState<'tcp' | 'udp'>('tcp')
-  const [busy, setBusy] = useState(false)
   const [presetBusy, setPresetBusy] = useState<string | null>(null)
+  const [enabledBusy, setEnabledBusy] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
@@ -308,26 +306,18 @@ function FirewallCard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload])
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault()
+  async function toggleEnabled() {
+    if (!status) return
     setError('')
-    const portNum = Number(port)
-    if (!portNum || portNum < 1 || portNum > 65535) {
-      setError('Puerto inválido')
-      return
-    }
-    setBusy(true)
+    setEnabledBusy(true)
     try {
-      const s = await api.post<FirewallStatus>('/system/security/firewall/rules', {
-        action, port: portNum, proto,
-      })
+      const s = await api.put<FirewallStatus>('/system/security/firewall/enabled', { enabled: !status.enabled })
       setStatus(s)
-      setPort('')
-      toast.success(action === 'allow' ? `Puerto ${portNum}/${proto} abierto` : `Puerto ${portNum}/${proto} cerrado`)
+      toast.success(s.enabled ? 'Firewall activado' : 'Firewall desactivado')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo aplicar el cambio')
+      setError(err instanceof Error ? err.message : 'No se pudo cambiar el estado del firewall')
     } finally {
-      setBusy(false)
+      setEnabledBusy(false)
     }
   }
 
@@ -424,7 +414,32 @@ function FirewallCard() {
   }
 
   return (
-    <Card title="Firewall">
+    <>
+      <div className="fw-head">
+        <div />
+        <div className="fw-global">
+          <div>
+            <div className="fw-global-label">Estado global</div>
+            <span className={`badge ${status.enabled ? 'ok' : 'idle'}`}>
+              <span className="dot" />{status.enabled ? 'Firewall activo' : 'Firewall inactivo'}
+            </span>
+          </div>
+          {status.enabled_known && (
+            <button
+              type="button"
+              className={`switch ${status.enabled ? 'on' : ''}`}
+              role="switch"
+              aria-checked={status.enabled}
+              aria-label="Estado global del firewall"
+              disabled={enabledBusy}
+              onClick={() => void toggleEnabled()}
+            >
+              <span className="knob" />
+            </button>
+          )}
+        </div>
+      </div>
+
       {error && <Alert kind="error">{error}</Alert>}
       {status.error && <Alert kind="error">No se pudo leer el estado: {status.error}</Alert>}
 
@@ -443,87 +458,171 @@ function FirewallCard() {
         </Alert>
       )}
 
-      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Detectados automáticamente</h3>
-      <div className="preset-grid" style={{ marginBottom: 20 }}>
-        {presets.map((preset) => {
-          const active = isPresetActive(preset)
-          const disabled = presetBusy !== null || preset.ports.length === 0
-          return (
-            <div className="preset-item" key={preset.key}>
-              <div>
-                <h3>{preset.title}</h3>
-                <p>{presetDesc(preset)}</p>
-              </div>
-              <button
-                type="button"
-                className={`switch ${active ? 'on' : ''}`}
-                role="switch"
-                aria-checked={active}
-                aria-label={preset.title}
-                disabled={disabled}
-                onClick={() => void togglePreset(preset)}
-              >
-                <span className="knob" />
-              </button>
-            </div>
-          )
-        })}
+      <div className="firewall-grid">
+        <Card
+          title="Reglas Actuales"
+          actions={
+            <button className="sm primary" onClick={() => setShowAddModal(true)}>
+              <Icon name="plus" size={14} />Añadir Regla de Firewall
+            </button>
+          }
+        >
+          {(status.rules ?? []).length === 0 ? (
+            <Empty text="No hay reglas activas." />
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>Acción</th><th>Protocolo</th><th>Puerto</th><th>Origen</th><th>Comentario</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.rules!.map((r, i) => (
+                  <tr key={i}>
+                    <td>
+                      <span className={`badge ${r.action === 'allow' ? 'ok' : 'err'}`}>
+                        <span className="dot" />{r.action === 'allow' ? 'Permitir' : 'Denegar'}
+                      </span>
+                    </td>
+                    <td>{r.proto.toUpperCase()}</td>
+                    <td className="strong">{r.port}</td>
+                    <td className="muted">{r.from}</td>
+                    <td className="muted">
+                      {r.comment || (r.port === status.protected_port ? 'Acceso SSH interno' : '—')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+
+        <Card title="Reglas Predefinidas">
+          <p className="muted" style={{ marginTop: 0, fontSize: 12.5 }}>
+            Activa rápidamente los servicios que este servidor ya tiene corriendo.
+          </p>
+          <div className="preset-list">
+            {presets.map((preset) => {
+              const active = isPresetActive(preset)
+              const disabled = presetBusy !== null || preset.ports.length === 0
+              return (
+                <div className="preset-item" key={preset.key}>
+                  <div>
+                    <h3>{preset.title}</h3>
+                    <p>{presetDesc(preset)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className={`switch ${active ? 'on' : ''}`}
+                    role="switch"
+                    aria-checked={active}
+                    aria-label={preset.title}
+                    disabled={disabled}
+                    onClick={() => void togglePreset(preset)}
+                  >
+                    <span className="knob" />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </Card>
       </div>
 
-      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Reglas actuales</h3>
-      {(status.rules ?? []).length === 0 ? (
-        <Empty text="No hay reglas activas." />
-      ) : (
-        <table>
-          <thead>
-            <tr><th>Puerto</th><th>Protocolo</th><th>Acción</th><th>Origen</th><th></th></tr>
-          </thead>
-          <tbody>
-            {status.rules!.map((r, i) => (
-              <tr key={i}>
-                <td className="strong">{r.port}</td>
-                <td>{r.proto.toUpperCase()}</td>
-                <td>
-                  <span className={`badge ${r.action === 'allow' ? 'ok' : 'err'}`}>
-                    <span className="dot" />{r.action === 'allow' ? 'Permitido' : 'Bloqueado'}
-                  </span>
-                </td>
-                <td className="muted">{r.from}</td>
-                <td>
-                  {r.port === status.protected_port ? (
-                    <span className="muted" style={{ fontSize: 12 }}>Puerto de SSH — protegido</span>
-                  ) : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      {showAddModal && (
+        <AddFirewallRuleModal
+          protectedPort={status.protected_port}
+          onClose={() => setShowAddModal(false)}
+          onCreated={(s) => { setShowAddModal(false); setStatus(s) }}
+        />
       )}
+    </>
+  )
+}
 
-      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '20px 0 10px' }}>Añadir regla</h3>
-      <form onSubmit={submit} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-        <div className="field" style={{ maxWidth: 140 }}>
-          <label htmlFor="fw-port">Puerto</label>
-          <input id="fw-port" type="number" min={1} max={65535} value={port} required
-                 onChange={(e) => setPort(e.target.value)} placeholder="8080" />
+function AddFirewallRuleModal({ protectedPort, onClose, onCreated }: {
+  protectedPort?: number
+  onClose: () => void
+  onCreated: (status: FirewallStatus) => void
+}) {
+  const toast = useToast()
+  const [action, setAction] = useState<'allow' | 'deny'>('allow')
+  const [port, setPort] = useState('')
+  const [proto, setProto] = useState<'tcp' | 'udp'>('tcp')
+  const [origin, setOrigin] = useState('')
+  const [comment, setComment] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault()
+    setError('')
+    const portNum = Number(port)
+    if (!portNum || portNum < 1 || portNum > 65535) {
+      setError('Puerto inválido')
+      return
+    }
+    if (action === 'deny' && protectedPort && portNum === protectedPort) {
+      setError('No se puede bloquear el puerto de SSH')
+      return
+    }
+    setBusy(true)
+    try {
+      const s = await api.post<FirewallStatus>('/system/security/firewall/rules', {
+        action, port: portNum, proto, origin: origin.trim(), comment: comment.trim(),
+      })
+      toast.success(`Regla ${action === 'allow' ? 'agregada' : 'de bloqueo'} para el puerto ${portNum}/${proto}`)
+      onCreated(s)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo aplicar la regla')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Modal title="Añadir Regla de Firewall" onClose={onClose}>
+      <form onSubmit={submit}>
+        {error && <Alert kind="error">{error}</Alert>}
+        <div className="row">
+          <div className="field">
+            <label htmlFor="fw-action">Acción</label>
+            <select id="fw-action" value={action} onChange={(e) => setAction(e.target.value as 'allow' | 'deny')}>
+              <option value="allow">Permitir</option>
+              <option value="deny">Denegar</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="fw-proto">Protocolo</label>
+            <select id="fw-proto" value={proto} onChange={(e) => setProto(e.target.value as 'tcp' | 'udp')}>
+              <option value="tcp">TCP</option>
+              <option value="udp">UDP</option>
+            </select>
+          </div>
         </div>
-        <div className="field" style={{ maxWidth: 120 }}>
-          <label htmlFor="fw-proto">Protocolo</label>
-          <select id="fw-proto" value={proto} onChange={(e) => setProto(e.target.value as 'tcp' | 'udp')}>
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-          </select>
+        <div className="row">
+          <div className="field">
+            <label htmlFor="fw-port">Puerto</label>
+            <input id="fw-port" type="number" min={1} max={65535} value={port} required
+                   onChange={(e) => setPort(e.target.value)} placeholder="8080" />
+          </div>
+          <div className="field">
+            <label htmlFor="fw-origin">Origen</label>
+            <input id="fw-origin" value={origin} onChange={(e) => setOrigin(e.target.value)}
+                   placeholder="Cualquiera (0.0.0.0/0) o 203.0.113.5/32" />
+          </div>
         </div>
-        <div className="field" style={{ maxWidth: 140 }}>
-          <label htmlFor="fw-action">Acción</label>
-          <select id="fw-action" value={action} onChange={(e) => setAction(e.target.value as 'allow' | 'deny')}>
-            <option value="allow">Abrir</option>
-            <option value="deny">Cerrar</option>
-          </select>
+        <div className="field">
+          <label htmlFor="fw-comment">Comentario</label>
+          <input id="fw-comment" value={comment} onChange={(e) => setComment(e.target.value)}
+                 placeholder="Para qué es esta regla (opcional)" maxLength={80} />
         </div>
-        <button className="primary" disabled={busy}>{busy ? 'Aplicando…' : 'Aplicar'}</button>
+        <div className="modal-actions">
+          <button type="button" onClick={onClose}>Cancelar</button>
+          <button className="primary" disabled={busy}>{busy ? 'Aplicando…' : 'Añadir regla'}</button>
+        </div>
       </form>
-    </Card>
+    </Modal>
   )
 }
 

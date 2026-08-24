@@ -432,18 +432,81 @@ configurar_hostctl() {
 #!/usr/bin/env bash
 # Instalado por install.sh — comando forzado para el acceso SSH del panel.
 # Lista blanca estricta: cualquier otra cosa termina en "exit 1". La salida
-# de "status" se normaliza a "PUERTO/PROTO allow|deny" (una regla por línea)
-# para que el panel no tenga que parsear el formato de cada herramienta.
+# de "status" se normaliza a "PUERTO/PROTO<TAB>allow|deny<TAB>ORIGEN<TAB>COMENTARIO"
+# (una regla por línea, con TAB de separador — así el comentario puede traer
+# espacios sin romper el parseo del lado del panel) para que el panel no
+# tenga que parsear el formato de cada herramienta.
 set -euo pipefail
 SSH_PORT=${ssh_port}
 case "\${SSH_ORIGINAL_COMMAND:-}" in
     status)
-        ufw status verbose | grep 'ALLOW IN' | grep -v '(v6)' | awk '{
+        if ufw status | head -1 | grep -q 'Status: active'; then
+            echo -e "GLOBAL\tenabled"
+        else
+            echo -e "GLOBAL\tdisabled"
+        fi
+        ufw status verbose | grep -E 'ALLOW IN|DENY IN|REJECT IN' | grep -v '(v6)' | awk '{
             split(\$1, a, "/"); proto = (a[2] == "" ? "tcp" : a[2])
-            print a[1]"/"proto" allow"
-        }'
+            action = (\$2 == "ALLOW") ? "allow" : "deny"
+            origin = \$4
+            if (origin == "") origin = "Anywhere"
+            comment = ""
+            idx = index(\$0, "#")
+            if (idx > 0) {
+                comment = substr(\$0, idx + 1)
+                gsub(/^[ \t]+|[ \t]+\$/, "", comment)
+            }
+            printf "%s/%s\t%s\t%s\t%s\n", a[1], proto, action, origin, comment
+        }' || true
+        ;;
+    enable)
+        exec ufw --force enable
+        ;;
+    disable)
+        exec ufw disable
+        ;;
+    rule\ *)
+        # "rule <allow|deny> <puerto> <tcp|udp> <origen> [comentario libre...]"
+        # read con la última variable como "resto de la línea" es justo lo
+        # que hace falta para que el comentario pueda traer espacios sin
+        # necesitar ningún esquema de codificación.
+        read -r _ action port proto origin comment <<<"\$SSH_ORIGINAL_COMMAND"
+        [[ "\$action" == "allow" || "\$action" == "deny" ]] || { echo "acción inválida" >&2; exit 1; }
+        [[ "\$port" =~ ^[0-9]{1,5}\$ && "\$port" -ge 1 && "\$port" -le 65535 ]] || { echo "puerto inválido" >&2; exit 1; }
+        [[ "\$proto" == "tcp" || "\$proto" == "udp" ]] || { echo "protocolo inválido" >&2; exit 1; }
+        if [[ "\$action" == "deny" && "\$port" == "\$SSH_PORT" ]]; then
+            echo "rechazado: no se puede bloquear el puerto de SSH (\${SSH_PORT})" >&2
+            exit 1
+        fi
+        [[ -z "\$origin" ]] && origin="any"
+        if [[ "\$origin" != "any" && ! "\$origin" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?\$ ]]; then
+            echo "origen inválido: debe ser \"any\" o una IP/CIDR" >&2
+            exit 1
+        fi
+        # Lista blanca de caracteres del comentario: alfanuméricos, espacio y
+        # puntuación básica — ni siquiera hace falta escapar nada más abajo
+        # (se pasa como argv de un array, nunca por una subshell de texto),
+        # pero cortar acá lo que no es texto de etiqueta evita sorpresas.
+        if [[ -n "\$comment" && ! "\$comment" =~ ^[A-Za-z0-9\ \.,_/\(\)-]{0,80}\$ ]]; then
+            echo "comentario inválido: solo letras, números, espacios y . , _ / ( ) -" >&2
+            exit 1
+        fi
+        # "deny" se inserta primero (máxima prioridad): si ya existe un
+        # "allow" más amplio para el mismo puerto (p. ej. desde "any"), ufw
+        # evalúa en orden y el primer match gana — sin insertarlo al frente,
+        # un deny agregado *después* de un allow más general nunca se
+        # aplicaría. "allow" sí se agrega al final, comportamiento normal.
+        if [[ "\$action" == "deny" ]]; then
+            args=(ufw insert 1 deny proto "\$proto" from "\$origin" to any port "\$port")
+        else
+            args=(ufw allow proto "\$proto" from "\$origin" to any port "\$port")
+        fi
+        [[ -n "\$comment" ]] && args+=(comment "\$comment")
+        exec "\${args[@]}"
         ;;
     allow\ [0-9]*\ tcp|allow\ [0-9]*\ udp)
+        # Forma vieja, sin origen/comentario — se mantiene por compatibilidad
+        # con un panel que todavía no se actualizó a la variante "rule".
         set -- \$SSH_ORIGINAL_COMMAND
         exec ufw allow "\${2}/\${3}"
         ;;
@@ -466,19 +529,87 @@ EOF
 #!/usr/bin/env bash
 # Instalado por install.sh — comando forzado para el acceso SSH del panel
 # (variante firewalld). Lista blanca estricta, misma salida normalizada que
-# la variante ufw: "PUERTO/PROTO allow|deny" para "status".
+# la variante ufw: "PUERTO/PROTO<TAB>allow|deny<TAB>ORIGEN<TAB>COMENTARIO"
+# para "status".
 set -euo pipefail
 SSH_PORT=${ssh_port}
 ZONE="\$(firewall-cmd --get-default-zone)"
 case "\${SSH_ORIGINAL_COMMAND:-}" in
     status)
+        if systemctl is-active --quiet firewalld; then
+            echo -e "GLOBAL\tenabled"
+        else
+            echo -e "GLOBAL\tdisabled"
+        fi
         # El "|| true" es necesario: si no hay puertos abiertos todavía, el
         # grep no encuentra nada y sale con estado 1 — sin esto, set -e
         # cortaría el script entero antes de llegar al chequeo de SSH.
-        firewall-cmd --zone="\$ZONE" --list-ports | tr ' ' '\n' | grep -E '^[0-9]+/(tcp|udp)\$' | sed 's/\$/ allow/' || true
+        firewall-cmd --zone="\$ZONE" --list-ports | tr ' ' '\n' | grep -E '^[0-9]+/(tcp|udp)\$' \\
+            | while IFS= read -r pp; do printf "%s\tallow\tAnywhere\t\n" "\$pp"; done || true
         if firewall-cmd --zone="\$ZONE" --list-services | grep -qw ssh; then
-            echo "\${SSH_PORT}/tcp allow"
+            printf "%s/tcp\tallow\tAnywhere\t\n" "\$SSH_PORT"
         fi
+        # Reglas ricas: son las que trae el comentario/origen (creadas por
+        # el panel vía "rule"). Se leen los atributos con grep -o en vez de
+        # un parser de verdad porque firewalld siempre las imprime en el
+        # mismo orden fijo (family, source, port, veredicto, comment).
+        firewall-cmd --zone="\$ZONE" --list-rich-rules | while IFS= read -r rr; do
+            [[ -z "\$rr" ]] && continue
+            # "|| true" en cada extracción: bajo pipefail, un grep que no
+            # matchea (p. ej. una regla "any" sin "address=", o sin
+            # "comment=") corta el pipe con estado != 0 — sin esto, set -e
+            # mata el script entero acá adentro del "while" y las reglas que
+            # vinieran después de la primera con un atributo ausente nunca
+            # se llegan a imprimir.
+            port="\$(grep -oE 'port="[0-9]+"' <<<"\$rr" | head -1 | grep -oE '[0-9]+' || true)"
+            proto="\$(grep -oE 'protocol="(tcp|udp)"' <<<"\$rr" | head -1 | grep -oE 'tcp|udp' || true)"
+            [[ -z "\$port" || -z "\$proto" ]] && continue
+            origin="\$(grep -oE 'address="[^"]+"' <<<"\$rr" | head -1 | sed -E 's/address="([^"]+)"/\1/' || true)"
+            [[ -z "\$origin" ]] && origin="Anywhere"
+            action="allow"
+            if grep -q ' drop' <<<"\$rr"; then action="deny"; fi
+            comment="\$(grep -oE 'comment="[^"]*"' <<<"\$rr" | sed -E 's/comment="([^"]*)"/\1/' || true)"
+            printf "%s/%s\t%s\t%s\t%s\n" "\$port" "\$proto" "\$action" "\$origin" "\$comment"
+        done
+        ;;
+    enable)
+        exec systemctl start firewalld
+        ;;
+    disable)
+        exec systemctl stop firewalld
+        ;;
+    rule\ *)
+        read -r _ action port proto origin comment <<<"\$SSH_ORIGINAL_COMMAND"
+        [[ "\$action" == "allow" || "\$action" == "deny" ]] || { echo "acción inválida" >&2; exit 1; }
+        [[ "\$port" =~ ^[0-9]{1,5}\$ && "\$port" -ge 1 && "\$port" -le 65535 ]] || { echo "puerto inválido" >&2; exit 1; }
+        [[ "\$proto" == "tcp" || "\$proto" == "udp" ]] || { echo "protocolo inválido" >&2; exit 1; }
+        if [[ "\$action" == "deny" && "\$port" == "\$SSH_PORT" ]]; then
+            echo "rechazado: no se puede bloquear el puerto de SSH (\${SSH_PORT})" >&2
+            exit 1
+        fi
+        [[ -z "\$origin" ]] && origin="any"
+        if [[ "\$origin" != "any" && ! "\$origin" =~ ^[0-9a-fA-F:.]+(/[0-9]{1,3})?\$ ]]; then
+            echo "origen inválido: debe ser \"any\" o una IP/CIDR" >&2
+            exit 1
+        fi
+        # Misma lista blanca que la variante ufw — acá además evita que el
+        # comentario pueda meter una comilla y romper la regla rica.
+        if [[ -n "\$comment" && ! "\$comment" =~ ^[A-Za-z0-9\ \.,_/\(\)-]{0,80}\$ ]]; then
+            echo "comentario inválido: solo letras, números, espacios y . , _ / ( ) -" >&2
+            exit 1
+        fi
+        family="ipv4"
+        [[ "\$origin" == *:* ]] && family="ipv6"
+        verb="accept"
+        [[ "\$action" == "deny" ]] && verb="drop"
+        rule="rule"
+        if [[ "\$origin" != "any" ]]; then
+            rule="\$rule family=\"\$family\" source address=\"\$origin\""
+        fi
+        rule="\$rule port protocol=\"\$proto\" port=\"\$port\" \$verb"
+        [[ -n "\$comment" ]] && rule="\$rule comment=\"\$comment\""
+        firewall-cmd --permanent --zone="\$ZONE" --add-rich-rule="\$rule" >/dev/null
+        exec firewall-cmd --reload
         ;;
     allow\ [0-9]*\ tcp|allow\ [0-9]*\ udp)
         set -- \$SSH_ORIGINAL_COMMAND

@@ -25,8 +25,14 @@ func (s *Server) hostctlClient() (*hostctl.Client, error) {
 }
 
 type firewallResponse struct {
-	Configured bool           `json:"configured"`
-	Rules      []hostctl.Rule `json:"rules,omitempty"`
+	Configured bool `json:"configured"`
+	// Enabled solo es significativo si EnabledKnown es true — un host cuyo
+	// script todavía no se actualizó (hace falta volver a correr
+	// install.sh) no manda el estado global, y no hay forma de saber si el
+	// firewall está activo sin adivinar.
+	Enabled      bool           `json:"enabled"`
+	EnabledKnown bool           `json:"enabled_known,omitempty"`
+	Rules        []hostctl.Rule `json:"rules,omitempty"`
 	// DockerPorts: puertos que algún contenedor gestionado por el panel
 	// (borde, SFTP, correo) publica ahora mismo al host, detectados vía
 	// Docker en vez de leídos del firewall. Docker les pone su propia regla
@@ -105,9 +111,45 @@ func (s *Server) handleGetFirewall(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	st := hostctl.ParseStatus(raw)
 	httpx.OK(w, firewallResponse{
-		Configured: true, Rules: hostctl.ParseStatus(raw), ProtectedPort: s.cfg.SSHPort, DockerPorts: dockerPorts,
+		Configured: true, Enabled: st.Enabled, EnabledKnown: st.EnabledKnown, Rules: st.Rules,
+		ProtectedPort: s.cfg.SSHPort, DockerPorts: dockerPorts,
 	})
+}
+
+// handleSetFirewallEnabled activa o desactiva el firewall del host por
+// completo. Acción explícita, con su propia entrada de auditoría — nunca
+// corre sola.
+func (s *Server) handleSetFirewallEnabled(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	client, err := s.hostctlClient()
+	if errors.Is(err, hostctl.ErrNotConfigured) {
+		httpx.Error(w, http.StatusBadRequest, "el acceso al firewall del host no está configurado en este servidor")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if out, err := client.SetEnabled(r.Context(), req.Enabled); err != nil {
+		httpx.Error(w, http.StatusBadGateway, "el host rechazó el cambio: "+err.Error()+" "+out)
+		return
+	}
+
+	id := auth.MustIdentity(r.Context())
+	s.st.Audit(r.Context(), models.AuditEntry{
+		ActorID: &id.UserID, ActorUsername: id.Username,
+		Action: "system.firewall_enabled", Detail: map[string]any{"enabled": req.Enabled},
+		IPAddress: httpx.ClientIP(r),
+	})
+	s.handleGetFirewall(w, r)
 }
 
 // handleSyncDockerFirewall agrega al firewall del host (ufw) una regla
@@ -132,7 +174,7 @@ func (s *Server) handleSyncDockerFirewall(w http.ResponseWriter, r *http.Request
 		return
 	}
 	existing := map[string]bool{}
-	for _, ru := range hostctl.ParseStatus(raw) {
+	for _, ru := range hostctl.ParseStatus(raw).Rules {
 		if ru.Action == "allow" {
 			existing[strconv.Itoa(ru.Port)+"/"+ru.Proto] = true
 		}
@@ -166,6 +208,13 @@ type firewallRuleRequest struct {
 	Action string `json:"action"` // "allow" | "deny"
 	Port   int    `json:"port"`
 	Proto  string `json:"proto"`
+	// Origin/Comment son opcionales: los presets y el toggle rápido no los
+	// mandan (usan la forma simple, que en "deny" borra el "allow"
+	// existente — ver el comentario de SetRule). El formulario de "Añadir
+	// regla" sí los manda, y ahí "deny" inserta una regla explícita en vez
+	// de borrar nada — ver SetRuleFull.
+	Origin  string `json:"origin,omitempty"`
+	Comment string `json:"comment,omitempty"`
 }
 
 func (s *Server) handleSetFirewallRule(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +232,13 @@ func (s *Server) handleSetFirewallRule(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	out, err := client.SetRule(r.Context(), req.Action, req.Port, req.Proto)
+
+	var out string
+	if req.Origin == "" && req.Comment == "" {
+		out, err = client.SetRule(r.Context(), req.Action, req.Port, req.Proto)
+	} else {
+		out, err = client.SetRuleFull(r.Context(), req.Action, req.Port, req.Proto, req.Origin, req.Comment)
+	}
 	if errors.Is(err, hostctl.ErrProtectedPort) {
 		httpx.FieldError(w, "port", "es el puerto de SSH; no se puede bloquear desde el panel")
 		return
@@ -198,6 +253,7 @@ func (s *Server) handleSetFirewallRule(w http.ResponseWriter, r *http.Request) {
 		ActorID: &id.UserID, ActorUsername: id.Username,
 		Action: "system.firewall_rule", Detail: map[string]any{
 			"action": req.Action, "port": req.Port, "proto": req.Proto,
+			"origin": req.Origin, "comment": req.Comment,
 		}, IPAddress: httpx.ClientIP(r),
 	})
 	s.handleGetFirewall(w, r)
