@@ -308,6 +308,12 @@ services:
       ROUNDCUBEMAIL_DES_KEY: ${GOCP_ROUNDCUBE_DES_KEY:-}
     volumes:
       - roundcube_data:/var/www/html
+      # La base SQLite propia de Roundcube (usuarios, sesiones, libreta de
+      # contactos) vive en esta ruta separada de /var/www/html — sin este
+      # volumen la imagen no puede crear el archivo y Roundcube falla con
+      # "¡Solicitud no válida!" en cualquier acción (no puede persistir la
+      # sesión ni el token CSRF).
+      - roundcube_db:/var/roundcube/db
     networks:
       - sites
 
@@ -326,3 +332,4 @@ volumes:
   mail_state:
   mail_config:
   roundcube_data:
+  roundcube_db:

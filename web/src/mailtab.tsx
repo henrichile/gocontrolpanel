@@ -224,8 +224,13 @@ function CreateMailboxModal({ accountID, domains, onClose, onCreated }: {
       onCreated()
     } catch (err) {
       const apiErr = err as ApiError
-      setError(apiErr.message)
-      setFields(apiErr.fields ?? {})
+      const fieldErrors = apiErr.fields ?? {}
+      setFields(fieldErrors)
+      // apiErr.message es un texto genérico ("datos inválidos"); el motivo
+      // real vive en `fields`, así que lo mostramos arriba sea cual sea el
+      // campo (no todos tienen un lugar inline en este formulario, como
+      // "mail_domain_id" o "plan").
+      setError(Object.values(fieldErrors).join(' ') || apiErr.message)
     } finally {
       setBusy(false)
     }
