@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { api, type EmailTemplate, type SMTPSettings } from '../api'
-import { Alert, Card, Spinner } from '../components'
+import { api, type EmailTemplate, type MailServerStatus, type SMTPSettings } from '../api'
+import { Alert, Card, Empty, Spinner } from '../components'
 import { errorMessage, useToast } from '../toast'
 
-type Tab = 'smtp' | 'plantillas'
+type Tab = 'smtp' | 'plantillas' | 'servidor-correo'
 
 export default function Settings() {
   const [tab, setTab] = useState<Tab>('smtp')
@@ -24,11 +24,98 @@ export default function Settings() {
         <button className={tab === 'plantillas' ? 'active' : ''} onClick={() => setTab('plantillas')}>
           Plantillas de email
         </button>
+        <button className={tab === 'servidor-correo' ? 'active' : ''} onClick={() => setTab('servidor-correo')}>
+          Servidor de correo
+        </button>
       </div>
 
       {tab === 'smtp' && <SMTPCard />}
       {tab === 'plantillas' && <TemplateCard />}
+      {tab === 'servidor-correo' && <MailServerCard />}
     </>
+  )
+}
+
+function MailServerCard() {
+  const toast = useToast()
+  const [status, setStatus] = useState<MailServerStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [checking, setChecking] = useState(false)
+
+  const reload = useCallback(async () => {
+    const s = await api.get<MailServerStatus>('/system/mailserver/status')
+    setStatus(s)
+  }, [])
+
+  useEffect(() => {
+    reload().catch((err) => toast.error(errorMessage(err, 'No se pudo consultar el servidor de correo')))
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload])
+
+  async function check() {
+    setChecking(true)
+    try {
+      await reload()
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo verificar el PTR/rDNS'))
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  if (loading) return <Card title="Servidor de correo"><Spinner /></Card>
+
+  if (!status?.enabled) {
+    return (
+      <Card title="Servidor de correo">
+        <Empty text="El correo no está habilitado en este servidor (perfil 'mail' de docker compose)." />
+      </Card>
+    )
+  }
+
+  return (
+    <Card
+      title="Servidor de correo"
+      actions={
+        <button className="sm" disabled={checking} onClick={() => void check()}>
+          {checking ? 'Verificando…' : 'Verificar PTR/rDNS'}
+        </button>
+      }
+    >
+      <p className="muted" style={{ marginTop: 0 }}>
+        Este es el hostname compartido (MX) que usan todos los dominios de clientes con correo
+        habilitado. El PTR/rDNS de la IP del servidor debe apuntar exactamente aquí — sin eso, la
+        mayoría de proveedores marcan el correo saliente como spam sin importar lo que publique
+        cada cliente en su propio DNS.
+      </p>
+
+      <div className="row">
+        <div className="field">
+          <label>Hostname (MX compartido)</label>
+          <input readOnly value={status.hostname ?? ''} style={{ fontFamily: 'monospace' }} />
+        </div>
+        <div className="field">
+          <label>IP pública detectada</label>
+          <input readOnly value={status.public_ip ?? '—'} style={{ fontFamily: 'monospace' }} />
+        </div>
+      </div>
+
+      {status.ptr && (
+        <div className="field">
+          <label>PTR / rDNS</label>
+          <span className={`badge ${status.ptr.ok ? 'ok' : 'err'}`}>
+            <span className="dot" />
+            {status.ptr.ok ? `Correcto (${status.ptr.found})` : (status.ptr.error ?? 'No coincide')}
+          </span>
+          {!status.ptr.ok && status.ptr.found && (
+            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              PTR actual: {status.ptr.found}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
   )
 }
 

@@ -403,6 +403,26 @@ export interface MailInfo {
   webmail_host?: string
 }
 
+export interface DNSCheck {
+  ok: boolean
+  found?: string
+  error?: string
+}
+
+export interface MailDomainVerification {
+  mx: DNSCheck
+  spf: DNSCheck
+  dkim: DNSCheck
+  dmarc: DNSCheck
+}
+
+export interface MailServerStatus {
+  enabled: boolean
+  hostname?: string
+  public_ip?: string
+  ptr?: DNSCheck
+}
+
 export interface WAFBlock {
   id: number
   occurred_at: string

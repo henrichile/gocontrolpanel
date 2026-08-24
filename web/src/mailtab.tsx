@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   api, type ApiError, type DKIMRecord, type MailDNSRecords, type MailDomain,
-  type MailInfo, type Mailbox,
+  type MailDomainVerification, type MailInfo, type Mailbox,
 } from './api'
 import { Alert, Card, Empty, Modal, Spinner, useConfirm } from './components'
 import { Icon } from './icons'
@@ -188,7 +188,12 @@ export function MailTab({ accountID, siteDomains }: { accountID: string; siteDom
       )}
 
       {viewingDNS && (
-        <MailDNSModal domain={viewingDNS.domain} records={viewingDNS.records} onClose={() => setViewingDNS(null)} />
+        <MailDNSModal
+          accountID={accountID}
+          domain={viewingDNS.domain}
+          records={viewingDNS.records}
+          onClose={() => setViewingDNS(null)}
+        />
       )}
     </>
   )
@@ -296,11 +301,42 @@ function DNSRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function MailDNSModal({ domain, records, onClose }: {
+function CheckBadge({ label, check }: { label: string; check?: { ok: boolean; error?: string } }) {
+  if (!check) return null
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <span className={`badge ${check.ok ? 'ok' : 'err'}`}>
+        <span className="dot" />{check.ok ? 'Propagado' : (check.error ?? 'Todavía no')}
+      </span>
+    </div>
+  )
+}
+
+function MailDNSModal({ accountID, domain, records, onClose }: {
+  accountID: string
   domain: string
   records: MailDNSRecords
   onClose: () => void
 }) {
+  const toast = useToast()
+  const [verifying, setVerifying] = useState(false)
+  const [verification, setVerification] = useState<MailDomainVerification | null>(null)
+
+  async function verify() {
+    setVerifying(true)
+    try {
+      const res = await api.post<MailDomainVerification>(
+        `/accounts/${accountID}/mail/domains/${domain}/verify`,
+      )
+      setVerification(res)
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudo verificar el DNS'))
+    } finally {
+      setVerifying(false)
+    }
+  }
+
   return (
     <Modal title={`Registros DNS para ${domain}`} onClose={onClose}>
       <p className="muted" style={{ marginTop: 0 }}>
@@ -313,6 +349,22 @@ function MailDNSModal({ domain, records, onClose }: {
         <DNSRow label={`DKIM (registro TXT en ${records.dkim.name})`} value={records.dkim.value} />
       )}
       {records.dmarc && <DNSRow label="DMARC (registro TXT en _dmarc)" value={records.dmarc} />}
+
+      <div className="actions" style={{ marginTop: 8, marginBottom: verification ? 8 : 0 }}>
+        <button className="sm" disabled={verifying} onClick={() => void verify()}>
+          {verifying ? 'Verificando…' : 'Verificar propagación'}
+        </button>
+      </div>
+
+      {verification && (
+        <div className="row" style={{ flexWrap: 'wrap' }}>
+          <CheckBadge label="MX" check={verification.mx} />
+          <CheckBadge label="SPF" check={verification.spf} />
+          <CheckBadge label="DKIM" check={verification.dkim} />
+          <CheckBadge label="DMARC" check={verification.dmarc} />
+        </div>
+      )}
+
       <div className="modal-actions">
         <button className="primary" onClick={onClose}>Listo</button>
       </div>

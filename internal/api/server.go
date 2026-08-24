@@ -198,6 +198,11 @@ func (s *Server) Handler() http.Handler {
 				r.Get("/system/mail/templates", s.handleListEmailTemplates)
 				r.Get("/system/mail/templates/{key}", s.handleGetEmailTemplate)
 				r.Put("/system/mail/templates/{key}", s.handleUpdateEmailTemplate)
+
+				// Estado del servidor de correo gestionado (docker-mailserver):
+				// no confundir con /system/mail/smtp, que es el correo saliente
+				// del propio panel hacia sus usuarios.
+				r.Get("/system/mailserver/status", s.handleMailServerStatus)
 			})
 		})
 	})

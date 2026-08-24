@@ -3,9 +3,13 @@
 package api
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -121,7 +125,12 @@ func (s *Server) handleVerifyMailDomain(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusServiceUnavailable, "el panel no tiene correo habilitado")
 		return
 	}
-	httpx.OK(w, verifyMailDNS(domain, s.svc.Mail().Hostname()))
+	md, err := s.st.GetMailDomainByDomain(r.Context(), domain)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	httpx.OK(w, verifyMailDNS(domain, s.svc.Mail().Hostname(), md.DKIMSelector, md.DKIMValue))
 }
 
 // --- Buzones -----------------------------------------------------------------
@@ -323,30 +332,76 @@ func (s *Server) handleChangeMailboxPassword(w http.ResponseWriter, r *http.Requ
 	httpx.NoContent(w)
 }
 
+// dnsCheck es el resultado de comprobar un registro DNS puntual: no busca
+// validar criptografía ni sintaxis exhaustiva, solo si el registro ya
+// propagó y contiene lo esperado — la señal que de verdad le sirve a un
+// admin/cliente esperando que su DNS se actualice.
+type dnsCheck struct {
+	OK    bool   `json:"ok"`
+	Found string `json:"found,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
 // verifyMailDNS consulta el DNS público del dominio bajo demanda (sin poller
-// de fondo) y reporta si el MX apunta al hostname esperado. No verifica
-// SPF/DKIM/DMARC en detalle (bastaría con que el cliente los haya copiado tal
-// cual) — el objetivo es la señal más simple y útil: "¿ya propagó el MX?".
-func verifyMailDNS(domain, expectedHostname string) map[string]any {
-	mxRecords, err := net.LookupMX(domain)
+// de fondo) y reporta MX/SPF/DKIM/DMARC.
+func verifyMailDNS(domain, expectedHostname, dkimSelector, dkimValue string) map[string]any {
+	return map[string]any{
+		"mx":    checkMX(domain, expectedHostname),
+		"spf":   checkTXTPrefix(domain, "v=spf1", "SPF"),
+		"dkim":  checkDKIM(domain, dkimSelector, dkimValue),
+		"dmarc": checkTXTPrefix("_dmarc."+domain, "v=DMARC1", "DMARC"),
+	}
+}
+
+func checkMX(domain, expectedHostname string) dnsCheck {
+	records, err := net.LookupMX(domain)
 	if err != nil {
-		return map[string]any{"mx_ok": false, "error": "no se pudo resolver el MX: " + err.Error()}
+		return dnsCheck{Error: "no se pudo resolver el MX: " + err.Error()}
 	}
 	expected := strings.TrimSuffix(expectedHostname, ".") + "."
-	for _, mx := range mxRecords {
+	found := make([]string, 0, len(records))
+	for _, mx := range records {
+		found = append(found, mx.Host)
 		if strings.EqualFold(mx.Host, expected) {
-			return map[string]any{"mx_ok": true}
+			return dnsCheck{OK: true, Found: mx.Host}
 		}
 	}
-	found := make([]string, 0, len(mxRecords))
-	for _, mx := range mxRecords {
-		found = append(found, mx.Host)
+	return dnsCheck{Error: "ningún MX apunta a " + expectedHostname, Found: strings.Join(found, ", ")}
+}
+
+// checkTXTPrefix busca, entre los TXT del nombre dado, uno que empiece con
+// prefix (p.ej. "v=spf1", "v=DMARC1") — es la comprobación de "propagó y
+// tiene la forma correcta", no una validación semántica completa del registro.
+func checkTXTPrefix(name, prefix, label string) dnsCheck {
+	records, err := net.LookupTXT(name)
+	if err != nil {
+		return dnsCheck{Error: "no se pudo resolver el TXT de " + label + ": " + err.Error()}
 	}
-	return map[string]any{
-		"mx_ok": false,
-		"error": "el MX del dominio no apunta a " + expectedHostname,
-		"found": found,
+	for _, txt := range records {
+		if strings.HasPrefix(txt, prefix) {
+			return dnsCheck{OK: true, Found: txt}
+		}
 	}
+	return dnsCheck{Error: label + " no encontrado en " + name, Found: strings.Join(records, " | ")}
+}
+
+func checkDKIM(domain, selector, expectedValue string) dnsCheck {
+	if selector == "" || expectedValue == "" {
+		return dnsCheck{Error: "el panel todavía no generó la clave DKIM para este dominio"}
+	}
+	name := selector + "._domainkey." + domain
+	records, err := net.LookupTXT(name)
+	if err != nil {
+		return dnsCheck{Error: "no se pudo resolver el TXT de DKIM: " + err.Error()}
+	}
+	for _, txt := range records {
+		// Los TXT largos suelen venir en fragmentos que el resolver concatena;
+		// alcanza con que contenga el valor que generamos.
+		if strings.Contains(txt, expectedValue) || strings.Contains(expectedValue, txt) {
+			return dnsCheck{OK: true, Found: txt}
+		}
+	}
+	return dnsCheck{Error: "el TXT de " + name + " no coincide con la clave generada", Found: strings.Join(records, " | ")}
 }
 
 // --- Info de correo del servidor (host de webmail, para el enlace del frontend)
@@ -360,4 +415,71 @@ func (s *Server) handleMailInfo(w http.ResponseWriter, r *http.Request) {
 		"enabled":      true,
 		"webmail_host": provision.WebmailHost(s.cfg.PublicURL),
 	})
+}
+
+// handleMailServerStatus expone el estado del servidor de correo en sí (no
+// de un dominio de cliente): hostname configurado y si el PTR/rDNS de la IP
+// pública del servidor coincide — precondición para que cualquier correo
+// saliente no caiga directo a spam, independiente de lo que cada cliente
+// publique en su propio DNS.
+func (s *Server) handleMailServerStatus(w http.ResponseWriter, r *http.Request) {
+	if s.svc.Mail() == nil {
+		httpx.OK(w, map[string]any{"enabled": false})
+		return
+	}
+	hostname := s.svc.Mail().Hostname()
+	resp := map[string]any{"enabled": true, "hostname": hostname}
+
+	ip, err := publicIP(r.Context())
+	if err != nil {
+		resp["ptr"] = dnsCheck{Error: "no se pudo determinar la IP pública del servidor: " + err.Error()}
+		httpx.OK(w, resp)
+		return
+	}
+	resp["public_ip"] = ip
+
+	names, err := net.LookupAddr(ip)
+	if err != nil {
+		resp["ptr"] = dnsCheck{Error: "la IP " + ip + " no tiene PTR/rDNS configurado: " + err.Error()}
+		httpx.OK(w, resp)
+		return
+	}
+	expected := strings.TrimSuffix(hostname, ".") + "."
+	for _, n := range names {
+		if strings.EqualFold(n, expected) {
+			resp["ptr"] = dnsCheck{OK: true, Found: n}
+			httpx.OK(w, resp)
+			return
+		}
+	}
+	resp["ptr"] = dnsCheck{
+		Error: "el PTR de " + ip + " no apunta a " + hostname,
+		Found: strings.Join(names, ", "),
+	}
+	httpx.OK(w, resp)
+}
+
+// publicIP resuelve la IP pública del servidor consultando un servicio
+// externo — mismo mecanismo que ya usa install.sh (comprobar_dns) para lo
+// mismo, aquí en Go para poder exponerlo desde el panel bajo demanda.
+func publicIP(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.ipify.org", nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return "", err
+	}
+	ip := strings.TrimSpace(string(raw))
+	if net.ParseIP(ip) == nil {
+		return "", fmt.Errorf("respuesta inesperada: %s", ip)
+	}
+	return ip, nil
 }

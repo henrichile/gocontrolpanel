@@ -939,6 +939,11 @@ GOCP_CADDY_EMAIL=${GOCP_EMAIL}
 GOCP_DOCKER_NETWORK=gocontrolpanel_sites
 GOCP_SITE_IMAGE_PREFIX=gocp/frankenphp
 GOCP_SITES_ROOT=${GOCP_DATA_DIR}
+# Usada por docker-compose.yml para los bind mounts de datos de clientes
+# (\${GOCP_DATA_DIR:-/srv/gocp/accounts}): así el archivo nunca necesita
+# editarse a mano cuando --data-dir difiere del default, y "gocp update"
+# (git pull) no se rompe por cambios locales en un archivo versionado.
+GOCP_DATA_DIR=${GOCP_DATA_DIR}
 GOCP_PANEL_UPSTREAM=gocp-panel:8080
 GOCP_DOCKER_GID=${DOCKER_GID}
  
@@ -980,18 +985,12 @@ preparar_directorios() {
     ejecutar chown 65532:65532 "$GOCP_DATA_DIR"
     ejecutar chmod 750 "$GOCP_DATA_DIR"
     ok "Directorio de cuentas: $GOCP_DATA_DIR"
- 
-    # docker-compose.yml monta esta ruta en el mismo punto dentro y fuera del
-    # contenedor (servicio "panel"), y también en el servicio "volumes-init"
-    # que la prepara en cada arranque. Si el usuario la cambió, hay que
-    # reflejarlo en ambos montajes.
-    if [[ "$GOCP_DATA_DIR" != "/srv/gocp/accounts" && $DRY_RUN -eq 0 ]]; then
-        info "Ajustando docker-compose.yml para usar $GOCP_DATA_DIR"
-        sed -i \
-            -e "s#/srv/gocp/accounts:/srv/gocp/accounts#${GOCP_DATA_DIR}:${GOCP_DATA_DIR}#" \
-            -e "s#/srv/gocp/accounts:/data#${GOCP_DATA_DIR}:/data#" \
-            "$GOCP_INSTALL_DIR/docker-compose.yml"
-    fi
+
+    # docker-compose.yml lee la ruta de GOCP_DATA_DIR (escrita en .env por
+    # escribir_env) vía \${GOCP_DATA_DIR:-/srv/gocp/accounts} en sus bind
+    # mounts — no hay que tocar el archivo versionado a mano. Editarlo con
+    # sed aquí (como hacía esta función antes) dejaba el árbol de git con
+    # cambios locales y rompía "gocp update" (git pull) en cada actualización.
 }
  
 # ──────────────────────────────────────────────────────────────────────────

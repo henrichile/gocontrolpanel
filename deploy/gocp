@@ -16,6 +16,17 @@ if [[ ! -f "$GOCP_INSTALL_DIR/docker-compose.yml" ]]; then
 fi
 cd "$GOCP_INSTALL_DIR"
 
+leer_env() {
+    # leer_env <clave> ; imprime el valor de esa clave en .env, o nada
+    grep -E "^${1}=" "$GOCP_INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-
+}
+
+# El perfil "mail" (docker-mailserver + Roundcube) solo existe si el operador
+# lo habilitó en install.sh o a mano en .env — sin esto, "docker compose ps"
+# y "gocp update" nunca verían esos contenedores aunque estén corriendo.
+PERFILES=()
+[[ "$(leer_env GOCP_MAIL_ENABLED)" == "true" ]] && PERFILES=(--profile mail)
+
 uso() {
     cat <<EOF
 gocp — gestión de GoControlPanel
@@ -30,13 +41,8 @@ gocp — gestión de GoControlPanel
 EOF
 }
 
-leer_env() {
-    # leer_env <clave> ; imprime el valor de esa clave en .env, o nada
-    grep -E "^${1}=" "$GOCP_INSTALL_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2-
-}
-
 cmd_status() {
-    docker compose ps
+    docker compose "${PERFILES[@]}" ps
 }
 
 cmd_logs() {
@@ -44,8 +50,8 @@ cmd_logs() {
 }
 
 cmd_restart() {
-    docker compose restart
-    docker compose ps
+    docker compose "${PERFILES[@]}" restart
+    docker compose "${PERFILES[@]}" ps
 }
 
 cmd_backup() {
@@ -97,13 +103,13 @@ cmd_update() {
     fi
 
     echo "→ Reconstruyendo y reiniciando los servicios…"
-    docker compose up -d --build
+    docker compose "${PERFILES[@]}" up -d --build
 
     echo "→ Aplicando migraciones…"
     docker compose exec -T panel /usr/local/bin/gocpd migrate
 
     echo "✓ GoControlPanel actualizado"
-    docker compose ps
+    docker compose "${PERFILES[@]}" ps
 }
 
 cmd_password() {

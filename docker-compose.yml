@@ -23,7 +23,10 @@ services:
     volumes:
       # ":z" re-etiqueta el directorio para SELinux (RHEL/AlmaLinux/Rocky con
       # SELinux en enforcing); en distros sin SELinux la opción se ignora.
-      - /srv/gocp/accounts:/data:z
+      # GOCP_DATA_DIR (definida en .env por install.sh --data-dir) permite
+      # cambiar esta ruta sin editar este archivo a mano: editarlo dejaría el
+      # árbol de git con cambios locales y rompería "gocp update" (git pull).
+      - ${GOCP_DATA_DIR:-/srv/gocp/accounts}:/data:z
     restart: "no"
 
   # --- Caddy de borde: TLS y reverse proxy hacia los sitios ----------------
@@ -89,7 +92,7 @@ services:
       GOCP_DOCKER_HOST: unix:///var/run/docker.sock
       GOCP_DOCKER_NETWORK: gocontrolpanel_sites
       GOCP_SITE_IMAGE_PREFIX: gocp/frankenphp
-      GOCP_SITES_ROOT: /srv/gocp/accounts
+      GOCP_SITES_ROOT: ${GOCP_DATA_DIR:-/srv/gocp/accounts}
       GOCP_MYSQL_DSN: root:${MYSQL_ROOT_PASSWORD:?}@tcp(mysql:3306)/
       GOCP_MYSQL_HOST: mysql
       GOCP_SFTP_ADMIN_URL: http://sftp:8080
@@ -130,7 +133,7 @@ services:
       # el panel pide a Docker apunten a directorios reales del host.
       # ":z" re-etiqueta el directorio para SELinux (RHEL/AlmaLinux/Rocky con
       # SELinux en enforcing); en distros sin SELinux la opción se ignora.
-      - /srv/gocp/accounts:/srv/gocp/accounts:z
+      - ${GOCP_DATA_DIR:-/srv/gocp/accounts}:${GOCP_DATA_DIR:-/srv/gocp/accounts}:z
       # Clave privada dedicada para el acceso SSH de solo firewall (ver
       # arriba); no existe hasta que install.sh corre configurar_hostctl.
       - ./.hostctl_key:/etc/gocp/hostctl_key:ro
@@ -165,7 +168,7 @@ services:
       - sftpgo_data:/var/lib/sftpgo
       # Mismos home que ve el panel: los usuarios SFTP quedan encadenados
       # (chroot) a la carpeta de su propia cuenta dentro de esta ruta.
-      - /srv/gocp/accounts:/srv/gocp/accounts:z
+      - ${GOCP_DATA_DIR:-/srv/gocp/accounts}:${GOCP_DATA_DIR:-/srv/gocp/accounts}:z
     networks:
       - sites
     healthcheck:
@@ -288,7 +291,14 @@ services:
       ROUNDCUBEMAIL_DEFAULT_PORT: 993
       ROUNDCUBEMAIL_SMTP_SERVER: tls://mailserver
       ROUNDCUBEMAIL_SMTP_PORT: 587
-      ROUNDCUBEMAIL_DES_KEY: ${GOCP_ROUNDCUBE_DES_KEY:?falta la clave de Roundcube; vuelve a ejecutar install.sh}
+      # Sin ":?": Docker Compose interpola las variables de TODOS los
+      # servicios del archivo, incluidos los de un profile no activado —
+      # exigirla aquí rompería "docker compose up" en cualquier instalación
+      # que no use el profile "mail", aunque nunca vaya a arrancar roundcube.
+      # Vacía es inofensiva mientras el servicio no se active; install.sh la
+      # genera igual siempre (ver escribir_env) para que, si se activa el
+      # profile "mail" más adelante, ya esté lista.
+      ROUNDCUBEMAIL_DES_KEY: ${GOCP_ROUNDCUBE_DES_KEY:-}
     volumes:
       - roundcube_data:/var/www/html
     networks:
