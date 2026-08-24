@@ -344,34 +344,45 @@ function FirewallCard() {
     )
   }
 
-  const presets: { key: string; label: string; desc: string; ports: { port: number; proto: 'tcp' | 'udp' }[] }[] = [
+  // Los puertos de cada preset salen de lo que Docker detectó publicado
+  // ahora mismo (status.docker_ports, etiquetado por servicio en "from" —
+  // ver dockerManagedPorts en el backend), nunca de un número inventado: así
+  // el preset de FTP muestra el puerto real de SFTPGo (2022) en vez de
+  // 20/21 (que este panel no usa), y el de correo solo lista lo que
+  // docker-mailserver realmente publica.
+  const dockerByLabel = (label: string) => (status.docker_ports ?? []).filter((r) => r.from === label)
+
+  const presets: {
+    key: string; title: string; ports: { port: number; proto: 'tcp' | 'udp' }[]; detected: boolean
+  }[] = [
+    { key: 'web', title: 'Servidor Web (HTTP/HTTPS)', ports: dockerByLabel('web'), detected: true },
     {
-      key: 'web', label: 'Servidor Web (HTTP/HTTPS)', desc: 'TCP puertos 80, 443',
-      ports: [{ port: 80, proto: 'tcp' }, { port: 443, proto: 'tcp' }],
+      key: 'ssh', title: 'Acceso SSH',
+      ports: [{ port: status.protected_port ?? 22, proto: 'tcp' }], detected: true,
     },
-    {
-      key: 'ssh', label: 'Acceso SSH', desc: `TCP puerto ${status.protected_port ?? 22}`,
-      ports: [{ port: status.protected_port ?? 22, proto: 'tcp' }],
-    },
-    {
-      key: 'ftp', label: 'Servidor FTP', desc: 'TCP puertos 20, 21',
-      ports: [{ port: 20, proto: 'tcp' }, { port: 21, proto: 'tcp' }],
-    },
-    {
-      key: 'mail', label: 'Correo (SMTP/IMAP/POP3)', desc: 'Múltiples puertos',
-      ports: [
-        { port: 25, proto: 'tcp' }, { port: 465, proto: 'tcp' }, { port: 587, proto: 'tcp' },
-        { port: 993, proto: 'tcp' }, { port: 995, proto: 'tcp' },
-      ],
-    },
+    { key: 'ftp', title: 'SFTP gestionado', ports: dockerByLabel('ftp'), detected: true },
+    { key: 'mail', title: 'Correo (SMTP/IMAP)', ports: dockerByLabel('mail'), detected: true },
   ]
 
+  function presetDesc(preset: typeof presets[number]) {
+    if (preset.ports.length === 0) {
+      return preset.key === 'mail' && !status!.docker_ports
+        ? 'Sin datos de Docker'
+        : preset.key === 'mail'
+          ? 'Correo no está habilitado en este servidor'
+          : 'No se detectó el contenedor corriendo'
+    }
+    return preset.ports.map((p) => `${p.port}/${p.proto}`).join(', ')
+  }
+
   function isPresetActive(preset: typeof presets[number]) {
+    if (preset.ports.length === 0) return false
     return preset.ports.every((p) =>
       status!.rules?.some((r) => r.port === p.port && r.proto === p.proto && r.action === 'allow'))
   }
 
   async function togglePreset(preset: typeof presets[number]) {
+    if (preset.ports.length === 0) return
     const active = isPresetActive(preset)
     setError('')
     setPresetBusy(preset.key)
@@ -383,9 +394,30 @@ function FirewallCard() {
         })
       }
       setStatus(s)
-      toast.success(active ? `${preset.label}: cerrado` : `${preset.label}: abierto`)
+      toast.success(active ? `${preset.title}: cerrado` : `${preset.title}: abierto`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo aplicar el cambio')
+    } finally {
+      setPresetBusy(null)
+    }
+  }
+
+  // Puertos que Docker ya publica pero que el firewall del host todavía no
+  // tiene como regla explícita — son igual de accesibles desde afuera
+  // (Docker se adelanta a ufw), pero conviene que el firewall también los
+  // liste como defensa en profundidad.
+  const unsynced = (status.docker_ports ?? []).filter((p) =>
+    !status.rules?.some((r) => r.port === p.port && r.proto === p.proto && r.action === 'allow'))
+
+  async function syncDocker() {
+    setError('')
+    setPresetBusy('sync')
+    try {
+      const s = await api.post<FirewallStatus>('/system/security/firewall/sync-docker')
+      setStatus(s)
+      toast.success('Firewall sincronizado con los puertos que Docker tiene publicados')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo sincronizar')
     } finally {
       setPresetBusy(null)
     }
@@ -396,23 +428,39 @@ function FirewallCard() {
       {error && <Alert kind="error">{error}</Alert>}
       {status.error && <Alert kind="error">No se pudo leer el estado: {status.error}</Alert>}
 
-      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Reglas predefinidas</h3>
+      {unsynced.length > 0 && (
+        <Alert kind="info">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <span>
+              Docker ya publica {unsynced.length === 1 ? 'un puerto' : `${unsynced.length} puertos`}
+              {' '}({unsynced.map((p) => `${p.port}/${p.proto}`).join(', ')}) sin regla en el
+              firewall del host — son accesibles igual, pero conviene reflejarlo acá.
+            </span>
+            <button className="sm primary" disabled={presetBusy !== null} onClick={() => void syncDocker()}>
+              {presetBusy === 'sync' ? 'Sincronizando…' : 'Sincronizar'}
+            </button>
+          </div>
+        </Alert>
+      )}
+
+      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Detectados automáticamente</h3>
       <div className="preset-grid" style={{ marginBottom: 20 }}>
         {presets.map((preset) => {
           const active = isPresetActive(preset)
+          const disabled = presetBusy !== null || preset.ports.length === 0
           return (
             <div className="preset-item" key={preset.key}>
               <div>
-                <h3>{preset.label}</h3>
-                <p>{preset.desc}</p>
+                <h3>{preset.title}</h3>
+                <p>{presetDesc(preset)}</p>
               </div>
               <button
                 type="button"
                 className={`switch ${active ? 'on' : ''}`}
                 role="switch"
                 aria-checked={active}
-                aria-label={preset.label}
-                disabled={presetBusy !== null}
+                aria-label={preset.title}
+                disabled={disabled}
                 onClick={() => void togglePreset(preset)}
               >
                 <span className="knob" />

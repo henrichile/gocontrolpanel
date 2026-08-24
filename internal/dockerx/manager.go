@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -399,6 +400,44 @@ func (m *Manager) ListManaged(ctx context.Context) ([]container.Summary, error) 
 		All:     true,
 		Filters: filters.NewArgs(filters.Arg("label", LabelManaged+"=true")),
 	})
+}
+
+// PublishedPort es un puerto que un contenedor en marcha publica al host
+// (columna "ports" de `docker ps`, tal como quedó tras aplicar el
+// docker-compose.yml — nunca hardcodeado en Go).
+type PublishedPort struct {
+	HostPort int
+	Proto    string // "tcp" | "udp"
+}
+
+// PublishedPorts devuelve los puertos que el contenedor "name" tiene
+// publicados al host ahora mismo (vacío si no existe o no está corriendo).
+// Sirve para detectar puertos que ya quedaron abiertos porque Docker les
+// puso su propia regla de iptables al publicarlos con "ports:" — eso pasa
+// *antes* que el firewall del host (ufw) los vea, así que un puerto puede
+// estar realmente accesible aunque ufw no tenga ninguna regla ALLOW para él.
+func (m *Manager) PublishedPorts(ctx context.Context, name string) ([]PublishedPort, error) {
+	info, err := m.cli.ContainerInspect(ctx, name)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if info.State == nil || !info.State.Running {
+		return nil, nil
+	}
+	var out []PublishedPort
+	for portProto, bindings := range info.NetworkSettings.Ports {
+		for _, b := range bindings {
+			hp, err := strconv.Atoi(b.HostPort)
+			if err != nil || hp == 0 {
+				continue
+			}
+			out = append(out, PublishedPort{HostPort: hp, Proto: portProto.Proto()})
+		}
+	}
+	return out, nil
 }
 
 // WaitHealthy espera a que el contenedor esté en estado "running".

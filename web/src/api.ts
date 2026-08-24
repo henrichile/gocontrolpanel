@@ -361,6 +361,11 @@ export interface FirewallRule {
 export interface FirewallStatus {
   configured: boolean
   rules?: FirewallRule[]
+  // Puertos que Docker ya publica al host (borde, SFTP, correo) ahora
+  // mismo, detectados por el backend inspeccionando los contenedores —
+  // pueden estar accesibles aunque no aparezcan en `rules`, porque Docker
+  // les pone su propia regla de iptables al publicarlos, antes que ufw.
+  docker_ports?: FirewallRule[]
   protected_port?: number
   error?: string
 }

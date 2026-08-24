@@ -2,8 +2,10 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,16 +25,73 @@ func (s *Server) hostctlClient() (*hostctl.Client, error) {
 }
 
 type firewallResponse struct {
-	Configured    bool           `json:"configured"`
-	Rules         []hostctl.Rule `json:"rules,omitempty"`
+	Configured bool           `json:"configured"`
+	Rules      []hostctl.Rule `json:"rules,omitempty"`
+	// DockerPorts: puertos que algún contenedor gestionado por el panel
+	// (borde, SFTP, correo) publica ahora mismo al host, detectados vía
+	// Docker en vez de leídos del firewall. Docker les pone su propia regla
+	// de iptables al publicarlos con "ports:", *antes* de que ufw los vea —
+	// así que puede haber puertos realmente accesibles aunque no aparezcan
+	// en Rules. Es solo informativo (de acá no sale ningún "action": el
+	// puerto está abierto porque Docker lo abrió, no porque el firewall lo
+	// permita); SincronizarDockerConFirewall es lo que agrega la regla que
+	// falta en ufw para que ambos coincidan.
+	DockerPorts   []hostctl.Rule `json:"docker_ports,omitempty"`
 	ProtectedPort int            `json:"protected_port,omitempty"`
 	Error         string         `json:"error,omitempty"`
 }
 
+// dockerManagedPorts detecta los puertos que los contenedores que el panel
+// conoce (borde, SFTP y — si está habilitado — correo) tienen publicados al
+// host en este momento. Nunca asume nada de docker-compose.yml a mano ni
+// inventa números de puerto: inspecciona cada contenedor por su nombre real
+// y lee sus bindings. El campo "From" no lleva un CIDR acá (no aplica a un
+// puerto publicado por Docker) — se reutiliza como etiqueta de a qué
+// servicio pertenece ("web"/"ftp"/"mail"), para que el frontend arme sus
+// presets con los puertos reales de cada uno en vez de adivinarlos.
+func (s *Server) dockerManagedPorts(ctx context.Context) []hostctl.Rule {
+	groups := []struct {
+		container string
+		label     string
+	}{
+		{s.cfg.EdgeContainerName, "web"},
+		{s.cfg.SFTPContainerName, "ftp"},
+	}
+	if s.cfg.MailEnabled {
+		groups = append(groups, struct {
+			container string
+			label     string
+		}{s.cfg.MailContainerName, "mail"})
+	}
+	seen := map[string]bool{}
+	var out []hostctl.Rule
+	for _, g := range groups {
+		if g.container == "" {
+			continue
+		}
+		ports, err := s.svc.Docker().PublishedPorts(ctx, g.container)
+		if err != nil {
+			slog.Warn("firewall: no se pudieron leer los puertos publicados", "container", g.container, "error", err)
+			continue
+		}
+		for _, p := range ports {
+			key := strconv.Itoa(p.HostPort) + "/" + p.Proto
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, hostctl.Rule{Port: p.HostPort, Proto: p.Proto, Action: "allow", From: g.label})
+		}
+	}
+	return out
+}
+
 func (s *Server) handleGetFirewall(w http.ResponseWriter, r *http.Request) {
+	dockerPorts := s.dockerManagedPorts(r.Context())
+
 	client, err := s.hostctlClient()
 	if errors.Is(err, hostctl.ErrNotConfigured) {
-		httpx.OK(w, firewallResponse{Configured: false})
+		httpx.OK(w, firewallResponse{Configured: false, DockerPorts: dockerPorts})
 		return
 	}
 	if err != nil {
@@ -41,12 +100,66 @@ func (s *Server) handleGetFirewall(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := client.Status(r.Context())
 	if err != nil {
-		httpx.OK(w, firewallResponse{Configured: true, Error: err.Error(), ProtectedPort: s.cfg.SSHPort})
+		httpx.OK(w, firewallResponse{
+			Configured: true, Error: err.Error(), ProtectedPort: s.cfg.SSHPort, DockerPorts: dockerPorts,
+		})
 		return
 	}
 	httpx.OK(w, firewallResponse{
-		Configured: true, Rules: hostctl.ParseStatus(raw), ProtectedPort: s.cfg.SSHPort,
+		Configured: true, Rules: hostctl.ParseStatus(raw), ProtectedPort: s.cfg.SSHPort, DockerPorts: dockerPorts,
 	})
+}
+
+// handleSyncDockerFirewall agrega al firewall del host (ufw) una regla
+// "allow" para cada puerto que Docker ya tiene publicado pero que todavía no
+// tiene una regla explícita — no cierra ni toca nada más. Es una acción
+// explícita (el admin la dispara con un botón), no algo que corra solo al
+// abrir la pestaña: agregar reglas de firewall es una acción, no una lectura.
+func (s *Server) handleSyncDockerFirewall(w http.ResponseWriter, r *http.Request) {
+	client, err := s.hostctlClient()
+	if errors.Is(err, hostctl.ErrNotConfigured) {
+		httpx.Error(w, http.StatusBadRequest, "el acceso al firewall del host no está configurado en este servidor")
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	raw, err := client.Status(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, "no se pudo leer el estado del firewall: "+err.Error())
+		return
+	}
+	existing := map[string]bool{}
+	for _, ru := range hostctl.ParseStatus(raw) {
+		if ru.Action == "allow" {
+			existing[strconv.Itoa(ru.Port)+"/"+ru.Proto] = true
+		}
+	}
+
+	var added []hostctl.Rule
+	for _, p := range s.dockerManagedPorts(r.Context()) {
+		if existing[strconv.Itoa(p.Port)+"/"+p.Proto] {
+			continue
+		}
+		if _, err := client.SetRule(r.Context(), "allow", p.Port, p.Proto); err != nil {
+			slog.Warn("firewall: no se pudo sincronizar un puerto de Docker", "port", p.Port, "proto", p.Proto, "error", err)
+			continue
+		}
+		added = append(added, p)
+	}
+
+	if len(added) > 0 {
+		id := auth.MustIdentity(r.Context())
+		s.st.Audit(r.Context(), models.AuditEntry{
+			ActorID: &id.UserID, ActorUsername: id.Username,
+			Action: "system.firewall_sync_docker", Detail: map[string]any{"added": added},
+			IPAddress: httpx.ClientIP(r),
+		})
+	}
+
+	s.handleGetFirewall(w, r)
 }
 
 type firewallRuleRequest struct {

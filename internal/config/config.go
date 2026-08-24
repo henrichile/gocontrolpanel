@@ -74,6 +74,7 @@ type Config struct {
 	SFTPAdminPassword string
 	SFTPPublicHost    string // host que el cliente usa para conectarse (dominio o IP)
 	SFTPPublicPort    int
+	SFTPContainerName string // nombre real del contenedor, para detectar sus puertos publicados
 
 	// Correo gestionado (opcional): docker-mailserver + Roundcube, un
 	// contenedor fijo administrado por "docker exec" (ver
@@ -140,6 +141,7 @@ func Load() (*Config, error) {
 		SFTPAdminPassword: env("GOCP_SFTP_ADMIN_PASSWORD", ""),
 		SFTPPublicHost:    env("GOCP_SFTP_PUBLIC_HOST", ""),
 		SFTPPublicPort:    envInt("GOCP_SFTP_PUBLIC_PORT", 2022),
+		SFTPContainerName: env("GOCP_SFTP_CONTAINER_NAME", "gocp-sftp"),
 
 		MailEnabled:       envBool("GOCP_MAIL_ENABLED", false),
 		MailContainerName: env("GOCP_MAIL_CONTAINER_NAME", "gocp-mailserver"),
