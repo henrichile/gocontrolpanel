@@ -106,7 +106,8 @@ services:
       GOCP_MAIL_ENABLED: ${GOCP_MAIL_ENABLED:-false}
       GOCP_MAIL_CONTAINER_NAME: gocp-mailserver
       GOCP_MAIL_HOSTNAME: ${GOCP_MAIL_HOSTNAME:-}
-      GOCP_MAIL_WEBMAIL_UPSTREAM: http://roundcube:80
+      # Sin esquema: Caddy espera "host:puerto" en el "dial" del reverse_proxy.
+      GOCP_MAIL_WEBMAIL_UPSTREAM: roundcube:80
       GOCP_ADMIN_USER: ${GOCP_ADMIN_USER:-admin}
       GOCP_ADMIN_EMAIL: ${GOCP_ADMIN_EMAIL:-admin@localhost}
       GOCP_ADMIN_PASSWORD: ${GOCP_ADMIN_PASSWORD:-}

@@ -141,10 +141,14 @@ func Load() (*Config, error) {
 		SFTPPublicHost:    env("GOCP_SFTP_PUBLIC_HOST", ""),
 		SFTPPublicPort:    envInt("GOCP_SFTP_PUBLIC_PORT", 2022),
 
-		MailEnabled:         envBool("GOCP_MAIL_ENABLED", false),
-		MailContainerName:   env("GOCP_MAIL_CONTAINER_NAME", "gocp-mailserver"),
-		MailHostname:        env("GOCP_MAIL_HOSTNAME", ""),
-		MailWebmailUpstream: env("GOCP_MAIL_WEBMAIL_UPSTREAM", "http://roundcube:80"),
+		MailEnabled:       envBool("GOCP_MAIL_ENABLED", false),
+		MailContainerName: env("GOCP_MAIL_CONTAINER_NAME", "gocp-mailserver"),
+		MailHostname:      env("GOCP_MAIL_HOSTNAME", ""),
+		// Sin esquema: Caddy espera "host:puerto" en el campo "dial" del
+		// reverse_proxy, no una URL — con "http://" antepuesto interpreta
+		// "http" como si fuera la red de transporte y falla con
+		// "dial http:: unknown network http:".
+		MailWebmailUpstream: env("GOCP_MAIL_WEBMAIL_UPSTREAM", "roundcube:80"),
 
 		BootstrapAdminUser:     env("GOCP_ADMIN_USER", "admin"),
 		BootstrapAdminEmail:    env("GOCP_ADMIN_EMAIL", "admin@localhost"),
