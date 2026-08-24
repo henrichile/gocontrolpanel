@@ -62,7 +62,19 @@ type Match struct {
 }
 
 type TLSApp struct {
-	Automation *TLSAutomation `json:"automation,omitempty"`
+	// Certificates.Automate fuerza la obtención/renovación de certificados
+	// para hosts que no tienen ninguna ruta HTTP propia (como el hostname del
+	// mailserver): sin esto, Caddy solo gestiona proactivamente los nombres
+	// que aparecen en el "host" de alguna ruta de http.servers — estar
+	// listado en automation.policies[].subjects no alcanza, eso solo define
+	// QUÉ política/emisor usar SI el nombre llega a necesitar un certificado,
+	// no que lo pida de entrada.
+	Certificates *TLSCertificates `json:"certificates,omitempty"`
+	Automation   *TLSAutomation   `json:"automation,omitempty"`
+}
+
+type TLSCertificates struct {
+	Automate []string `json:"automate,omitempty"`
 }
 
 type TLSAutomation struct {
@@ -286,7 +298,11 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 			automation.OnDemand = &OnDemand{Permission: perm}
 			automation.Policies = append(automation.Policies, TLSPolicy{OnDemand: true})
 		}
-		cfg.Apps.TLS = &TLSApp{Automation: automation}
+		tlsApp := &TLSApp{Automation: automation}
+		if opt.MailHostname != "" {
+			tlsApp.Certificates = &TLSCertificates{Automate: []string{opt.MailHostname}}
+		}
+		cfg.Apps.TLS = tlsApp
 	}
 
 	return cfg, nil
