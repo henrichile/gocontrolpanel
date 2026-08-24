@@ -79,9 +79,8 @@ export default function Login() {
     <div className="login-wrap">
       <form className="login-card" onSubmit={onSubmit}>
         <img src="/img/logo-azul.png" alt="CloudControl Panel" className="brand-logo" />
-        <h1>GoControlPanel</h1>
-        <p className="sub">Administración de hosting sobre FrankenPHP y Caddy</p>
-
+        <h1>Iniciar sesión</h1>
+        <p className="sub">Escribe tu usuario o correo y contraseña</p>
         {error && <Alert kind="error">{error}</Alert>}
 
         <div className="field">
