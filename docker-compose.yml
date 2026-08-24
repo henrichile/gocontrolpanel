@@ -273,7 +273,16 @@ services:
       - caddy_data:/caddy-certs:ro
       - /etc/localtime:/etc/localtime:ro
     networks:
-      - sites
+      sites:
+        # Alias igual al hostname del certificado: así Roundcube (u otro
+        # contenedor interno) puede conectarse usando el mismo nombre que
+        # valida el TLS, sin salir a internet ni depender de hairpin NAT.
+        # Sin esto, conectarse por el nombre del servicio ("mailserver")
+        # hace que la verificación de certificado falle por "hostname
+        # mismatch" y Dovecot ve la conexión cerrarse sin ningún intento
+        # de autenticación.
+        aliases:
+          - ${GOCP_MAIL_HOSTNAME:-mail.invalid}
     healthcheck:
       test: ["CMD", "ss", "-lnt", "sport", "=", ":25"]
       interval: 30s
@@ -293,10 +302,14 @@ services:
       # "ssl://" = TLS implícito (puerto 993, IMAPS); "tls://" sería STARTTLS
       # (puerto 143) — mezclarlos con el puerto equivocado rompe la conexión
       # ("ha fallado la conexión al servidor de almacenamiento").
-      ROUNDCUBEMAIL_DEFAULT_HOST: ssl://mailserver
+      # Mismo hostname que el certificado del mailserver (ver el alias de
+      # red de arriba) — conectarse por "mailserver" en cambio rompe la
+      # verificación TLS por "hostname mismatch" y Dovecot nunca ve un
+      # intento de login.
+      ROUNDCUBEMAIL_DEFAULT_HOST: ssl://${GOCP_MAIL_HOSTNAME:-mailserver}
       ROUNDCUBEMAIL_DEFAULT_PORT: 993
       # 587 sí es STARTTLS (submission), así que "tls://" es correcto aquí.
-      ROUNDCUBEMAIL_SMTP_SERVER: tls://mailserver
+      ROUNDCUBEMAIL_SMTP_SERVER: tls://${GOCP_MAIL_HOSTNAME:-mailserver}
       ROUNDCUBEMAIL_SMTP_PORT: 587
       # Sin ":?": Docker Compose interpola las variables de TODOS los
       # servicios del archivo, incluidos los de un profile no activado —
