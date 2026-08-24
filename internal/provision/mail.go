@@ -94,14 +94,25 @@ type DKIMRecord struct {
 	Value    string `json:"value"` // "v=DKIM1; k=rsa; p=..."
 }
 
+// DNSRecordEntry es un registro DNS listo para copiar tal como lo pide
+// cualquier panel de proveedor (Cloudflare, GoDaddy, Namecheap…): tipo,
+// nombre (FQDN completo — si el proveedor solo acepta la parte relativa,
+// basta con quitarle el dominio del final) y valor. Priority solo aplica a MX.
+type DNSRecordEntry struct {
+	Type     string `json:"type"`
+	Name     string `json:"name"`
+	Value    string `json:"value"`
+	Priority int    `json:"priority,omitempty"`
+}
+
 // MailDNSRecords son todos los registros que el cliente debe publicar en su
 // proveedor de DNS externo para que el correo funcione — el panel no
 // controla ese DNS, solo lo calcula y lo muestra.
 type MailDNSRecords struct {
-	MX    string     `json:"mx"`
-	SPF   string     `json:"spf"`
-	DKIM  DKIMRecord `json:"dkim"`
-	DMARC string     `json:"dmarc"`
+	MX    DNSRecordEntry `json:"mx"`
+	SPF   DNSRecordEntry `json:"spf"`
+	DKIM  DNSRecordEntry `json:"dkim"`
+	DMARC DNSRecordEntry `json:"dmarc"`
 }
 
 // EnableDomain genera (si no existían) las claves DKIM del dominio dentro del
@@ -172,9 +183,12 @@ func (m *MailManager) DNSRecords(domain string, dkim DKIMRecord) MailDNSRecords 
 		hostname = m.hostname
 	}
 	return MailDNSRecords{
-		MX:    "10 " + hostname + ".",
-		SPF:   "v=spf1 mx a:" + hostname + " ~all",
-		DKIM:  dkim,
-		DMARC: "v=DMARC1; p=quarantine; rua=mailto:postmaster@" + domain,
+		MX:   DNSRecordEntry{Type: "MX", Name: domain, Value: hostname, Priority: 10},
+		SPF:  DNSRecordEntry{Type: "TXT", Name: domain, Value: "v=spf1 mx a:" + hostname + " ~all"},
+		DKIM: DNSRecordEntry{Type: "TXT", Name: dkim.Name, Value: dkim.Value},
+		DMARC: DNSRecordEntry{
+			Type: "TXT", Name: "_dmarc." + domain,
+			Value: "v=DMARC1; p=quarantine; rua=mailto:postmaster@" + domain,
+		},
 	}
 }

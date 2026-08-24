@@ -375,17 +375,18 @@ export interface MailDomain {
   created_at: string
 }
 
-export interface DKIMRecord {
-  selector: string
+export interface DNSRecordEntry {
+  type: string
   name: string
   value: string
+  priority?: number
 }
 
 export interface MailDNSRecords {
-  mx: string
-  spf: string
-  dkim: DKIMRecord
-  dmarc: string
+  mx: DNSRecordEntry
+  spf: DNSRecordEntry
+  dkim: DNSRecordEntry
+  dmarc: DNSRecordEntry
 }
 
 export interface Mailbox {

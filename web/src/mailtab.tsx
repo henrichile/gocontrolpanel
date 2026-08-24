@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  api, type ApiError, type DKIMRecord, type MailDNSRecords, type MailDomain,
+  api, type ApiError, type MailDNSRecords, type MailDomain,
   type MailDomainVerification, type MailInfo, type Mailbox,
 } from './api'
 import { Alert, Card, Empty, Modal, Spinner, useConfirm } from './components'
@@ -53,7 +53,6 @@ export function MailTab({ accountID, siteDomains }: { accountID: string; siteDom
   }
 
   async function showDNS(md: MailDomain) {
-    const dkim: DKIMRecord = { selector: md.dkim_selector, name: `${md.dkim_selector}._domainkey.${md.domain}`, value: md.dkim_value }
     // El backend ya conoce el hostname del mailserver, pero recalcular MX/SPF
     // aquí duplicaría lógica — se pide de nuevo al endpoint de habilitar
     // (idempotente: no vuelve a tocar el contenedor si ya existe).
@@ -62,8 +61,8 @@ export function MailTab({ accountID, siteDomains }: { accountID: string; siteDom
         `/accounts/${accountID}/mail/domains/${md.domain}/enable`,
       )
       setViewingDNS({ domain: md.domain, records: res.records })
-    } catch {
-      setViewingDNS({ domain: md.domain, records: { mx: '', spf: '', dkim, dmarc: '' } })
+    } catch (err) {
+      toast.error(errorMessage(err, 'No se pudieron obtener los registros DNS'))
     }
   }
 
@@ -277,7 +276,7 @@ function CreateMailboxModal({ accountID, domains, onClose, onCreated }: {
   )
 }
 
-function DNSRow({ label, value }: { label: string; value: string }) {
+function CopyField({ label, value }: { label: string; value: string }) {
   const [copied, setCopied] = useState(false)
   async function copy() {
     try {
@@ -296,6 +295,52 @@ function DNSRow({ label, value }: { label: string; value: string }) {
         <button type="button" className="sm" onClick={() => void copy()}>
           {copied ? 'Copiado' : 'Copiar'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+// Si el proveedor de DNS pide el nombre "relativo" (sin el dominio al final,
+// como hacen Cloudflare/GoDaddy/Namecheap en su campo "Nombre/Host") en vez
+// del FQDN completo que devuelve el backend.
+function relativeName(name: string, domain: string): string {
+  if (name === domain) return '@'
+  const suffix = '.' + domain
+  return name.endsWith(suffix) ? name.slice(0, -suffix.length) : name
+}
+
+// Muestra un registro DNS completo tal como lo pide el formulario de
+// cualquier proveedor: tipo, nombre y valor por separado (en vez de una
+// sola línea que el cliente tendría que interpretar él mismo), más la
+// prioridad cuando aplica (solo MX).
+function DNSRecordCard({ label, domain, record }: {
+  label: string
+  domain: string
+  record: { type: string; name: string; value: string; priority?: number }
+}) {
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+      <div className="strong" style={{ marginBottom: 8 }}>{label}</div>
+      <div className="row">
+        <div className="field">
+          <label>Tipo</label>
+          <input readOnly value={record.type} style={{ fontFamily: 'monospace' }} />
+        </div>
+        <div className="field">
+          <label>Nombre / Host</label>
+          <input readOnly value={record.name} style={{ fontFamily: 'monospace' }} />
+        </div>
+        {record.priority !== undefined && (
+          <div className="field" style={{ maxWidth: 100 }}>
+            <label>Prioridad</label>
+            <input readOnly value={record.priority} style={{ fontFamily: 'monospace' }} />
+          </div>
+        )}
+      </div>
+      <CopyField label="Valor" value={record.value} />
+      <div className="muted" style={{ fontSize: 12, marginTop: -4 }}>
+        Si tu proveedor pide el nombre sin el dominio, usa{' '}
+        <code className="inline">{relativeName(record.name, domain)}</code> en vez del nombre completo.
       </div>
     </div>
   )
@@ -343,12 +388,10 @@ function MailDNSModal({ accountID, domain, records, onClose }: {
         Publica estos registros en el proveedor DNS de <strong>{domain}</strong> (el panel no lo
         controla). Pueden tardar horas en propagarse.
       </p>
-      {records.mx && <DNSRow label="MX" value={records.mx} />}
-      {records.spf && <DNSRow label="SPF (registro TXT en la raíz)" value={records.spf} />}
-      {records.dkim?.value && (
-        <DNSRow label={`DKIM (registro TXT en ${records.dkim.name})`} value={records.dkim.value} />
-      )}
-      {records.dmarc && <DNSRow label="DMARC (registro TXT en _dmarc)" value={records.dmarc} />}
+      <DNSRecordCard label="MX" domain={domain} record={records.mx} />
+      <DNSRecordCard label="SPF" domain={domain} record={records.spf} />
+      <DNSRecordCard label="DKIM" domain={domain} record={records.dkim} />
+      <DNSRecordCard label="DMARC" domain={domain} record={records.dmarc} />
 
       <div className="actions" style={{ marginTop: 8, marginBottom: verification ? 8 : 0 }}>
         <button className="sm" disabled={verifying} onClick={() => void verify()}>

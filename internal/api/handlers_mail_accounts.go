@@ -4,6 +4,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -353,10 +354,29 @@ func verifyMailDNS(domain, expectedHostname, dkimSelector, dkimValue string) map
 	}
 }
 
+// friendlyDNSError traduce un error de resolución DNS a un mensaje que un
+// admin/cliente pueda entender, sin exponer detalles internos del resolver
+// del contenedor (dirección del servidor DNS, timeouts de red, etc.). El caso
+// más común con diferencia es "todavía no hay nada publicado" (NXDOMAIN),
+// que no es un error real sino el estado esperado antes de propagar.
+func friendlyDNSError(err error, label string) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		switch {
+		case dnsErr.IsNotFound:
+			return "todavía no hay ningún registro " + label + " publicado para este dominio " +
+				"(normal si recién copiaste los datos — puede tardar desde minutos hasta unas horas en propagar)"
+		case dnsErr.IsTimeout:
+			return "se agotó el tiempo de espera consultando el DNS; inténtalo de nuevo en un momento"
+		}
+	}
+	return "no se pudo consultar el registro " + label + " de este dominio; inténtalo de nuevo en un momento"
+}
+
 func checkMX(domain, expectedHostname string) dnsCheck {
 	records, err := net.LookupMX(domain)
 	if err != nil {
-		return dnsCheck{Error: "no se pudo resolver el MX: " + err.Error()}
+		return dnsCheck{Error: friendlyDNSError(err, "MX")}
 	}
 	expected := strings.TrimSuffix(expectedHostname, ".") + "."
 	found := make([]string, 0, len(records))
@@ -366,7 +386,7 @@ func checkMX(domain, expectedHostname string) dnsCheck {
 			return dnsCheck{OK: true, Found: mx.Host}
 		}
 	}
-	return dnsCheck{Error: "ningún MX apunta a " + expectedHostname, Found: strings.Join(found, ", ")}
+	return dnsCheck{Error: "el MX apunta a otro servidor, no a " + expectedHostname, Found: strings.Join(found, ", ")}
 }
 
 // checkTXTPrefix busca, entre los TXT del nombre dado, uno que empiece con
@@ -375,14 +395,14 @@ func checkMX(domain, expectedHostname string) dnsCheck {
 func checkTXTPrefix(name, prefix, label string) dnsCheck {
 	records, err := net.LookupTXT(name)
 	if err != nil {
-		return dnsCheck{Error: "no se pudo resolver el TXT de " + label + ": " + err.Error()}
+		return dnsCheck{Error: friendlyDNSError(err, label)}
 	}
 	for _, txt := range records {
 		if strings.HasPrefix(txt, prefix) {
 			return dnsCheck{OK: true, Found: txt}
 		}
 	}
-	return dnsCheck{Error: label + " no encontrado en " + name, Found: strings.Join(records, " | ")}
+	return dnsCheck{Error: "hay un TXT en ese nombre pero no es " + label, Found: strings.Join(records, " | ")}
 }
 
 func checkDKIM(domain, selector, expectedValue string) dnsCheck {
@@ -392,7 +412,7 @@ func checkDKIM(domain, selector, expectedValue string) dnsCheck {
 	name := selector + "._domainkey." + domain
 	records, err := net.LookupTXT(name)
 	if err != nil {
-		return dnsCheck{Error: "no se pudo resolver el TXT de DKIM: " + err.Error()}
+		return dnsCheck{Error: friendlyDNSError(err, "DKIM")}
 	}
 	for _, txt := range records {
 		// Los TXT largos suelen venir en fragmentos que el resolver concatena;
@@ -440,7 +460,13 @@ func (s *Server) handleMailServerStatus(w http.ResponseWriter, r *http.Request) 
 
 	names, err := net.LookupAddr(ip)
 	if err != nil {
-		resp["ptr"] = dnsCheck{Error: "la IP " + ip + " no tiene PTR/rDNS configurado: " + err.Error()}
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			resp["ptr"] = dnsCheck{Error: "la IP " + ip + " no tiene ningún PTR/rDNS configurado " +
+				"(pídeselo a tu proveedor de VPS/cloud)"}
+		} else {
+			resp["ptr"] = dnsCheck{Error: "no se pudo consultar el PTR de " + ip + "; inténtalo de nuevo en un momento"}
+		}
 		httpx.OK(w, resp)
 		return
 	}
