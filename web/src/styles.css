@@ -7,7 +7,7 @@
    fija casi no se lee como texto sobre blanco, así que se usan sus pasos
    oscuros (mismo criterio que ya aplica la propia paleta al texto "good" en
    modo claro: #006300 en vez de #0ca30c). Todo verificado con
-   validate_palette.js: acento vs blanco 6.7:1, good 7.5:1, warning 5.8:1,
+   validate_palette.js: acento vs blanco 7:1, good 7.5:1, warning 5.8:1,
    serious 5.8:1, critical 4.8:1 — todos ≥ AA (4.5:1). */
 
 :root {
@@ -20,14 +20,17 @@
   --border-strong: rgba(15, 23, 42, 0.35);
   --grid: #e3e5ea;
 
-  --ink: #12141a;
+  /* --ink es el "Secondary" de la paleta de marca (#0F172A): mismo tono que
+     el fondo oscuro del sidebar/botón invertido, aplicado ahora como color
+     de texto sobre blanco. */
+  --ink: #0f172a;
   --ink-2: #454b58;
   --ink-muted: #767c89;
 
-  /* Acento de marca: azul índigo corporativo. Sobre blanco un mismo tono
-     alcanza 4.5:1 tanto como texto (enlaces) como fondo de botón, así que
-     --link no necesita ser un tinte aparte aquí (a diferencia del sidebar). */
-  --series-1: #1d4ed8;
+  /* Acento de marca: "Primary" de la paleta (#1852bd). Sobre blanco alcanza
+     7:1 tanto como texto (enlaces) como fondo de botón, así que --link no
+     necesita ser un tinte aparte aquí (a diferencia del sidebar). */
+  --series-1: #1852bd;
   --link: var(--series-1);
   --series-2: #d95926;
   --series-3: #199e70;
