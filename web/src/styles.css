@@ -48,12 +48,12 @@
    en vez de un gris casi negro. Redefine el mismo juego de variables dentro
    de su ámbito; todo lo que ya está escrito contra los tokens
    (var(--surface), var(--ink), var(--series-1)…) se adapta solo. Blanco
-   sobre #2563eb da 5.2:1 (≥ AA); los tonos "muted"/"2" son el mismo blanco
-   con menor opacidad, nunca un gris aparte, para que seguir siendo legibles
-   sobre el azul. */
+   sobre #1852bd da contraste de sobra (≥ AA); los tonos "muted"/"2" son el
+   mismo blanco con menor opacidad, nunca un gris aparte, para que seguir
+   siendo legibles sobre el azul. */
 .sidebar {
   color-scheme: dark;
-  --surface: #2563eb;
+  --surface: #1852bd;
   --surface-2: rgba(255, 255, 255, 0.14);
   --border: rgba(255, 255, 255, 0.18);
   --border-strong: rgba(255, 255, 255, 0.4);
@@ -120,13 +120,10 @@ a:hover {
    vez de recolorear un mismo archivo con filtros CSS. */
 .brand-logo {
   max-width: 100%;
-  height: 32px;
-  width: auto;
   display: block;
 }
 
 .login-card .brand-logo {
-  height: 40px;
   margin-bottom: 6px;
 }
 
