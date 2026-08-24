@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -269,6 +270,12 @@ func (s *Service) sendWelcomeEmail(ctx context.Context, in CreateAccountInput, a
 	}
 	result.EmailSent = true
 }
+
+// AutoSuspendBandwidthReason marca las suspensiones que hace el propio panel
+// al superarse la cuota mensual de transferencia del plan (ver worker.quotaLoop),
+// para poder distinguirlas de una suspensión manual del admin y reactivarlas
+// solas en el próximo reinicio del ciclo mensual.
+const AutoSuspendBandwidthReason = "cuota de transferencia superada (automático)"
 
 func (s *Service) SuspendAccount(ctx context.Context, id uuid.UUID, reason string) error {
 	if err := s.st.UpdateAccountStatus(ctx, id, models.AccountSuspended, reason); err != nil {
@@ -726,6 +733,41 @@ func (s *Service) prepareAccountDirs(systemUser string) error {
 		}
 	}
 	return nil
+}
+
+// AccountDiskUsageMB suma el tamaño real de todos los archivos de la cuenta
+// (sitios, backups, logs) para compararlo contra plan.DiskQuotaMB. Se llama
+// periódicamente desde el worker, no en cada petición: caminar el árbol de
+// archivos completo es demasiado costoso para hacerlo en el camino caliente.
+func (s *Service) AccountDiskUsageMB(systemUser string) (int64, error) {
+	base := filepath.Join(s.cfg.SitesRoot, systemUser)
+	var totalBytes int64
+	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// Un archivo desaparecido entre el listado y el stat no debe
+			// abortar el cálculo completo (borrado concurrente del cliente).
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil
+		}
+		totalBytes += info.Size()
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return totalBytes / (1024 * 1024), nil
 }
 
 func (s *Service) prepareSiteDirs(hostPath, docRoot, siteName string) error {

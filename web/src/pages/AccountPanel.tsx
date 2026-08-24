@@ -180,6 +180,12 @@ export default function AccountPanel() {
           used={account.disk_used_mb} max={account.plan?.disk_quota_mb ?? 0}
         />
         <StatCard
+          icon="activity" tone="violet" label="Transferencia (este mes)"
+          value={formatMB(account.bandwidth_used_mb)}
+          hint={`de ${formatMB(account.plan?.bandwidth_quota_mb ?? 0)}`}
+          used={account.bandwidth_used_mb} max={account.plan?.bandwidth_quota_mb ?? 0}
+        />
+        <StatCard
           icon="server" tone="violet" label="Sitios"
           value={sites.length}
           hint={`máximo ${account.plan?.max_sites ?? '—'}`}

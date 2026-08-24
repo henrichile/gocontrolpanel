@@ -103,13 +103,13 @@ func (s *Store) DeletePlan(ctx context.Context, id uuid.UUID) error {
 
 const accountCols = `a.id, a.owner_id, a.plan_id, a.unix_user, a.primary_domain,
                      a.status, a.suspend_reason, a.disk_used_mb, a.bandwidth_used_mb,
-                     a.notes, a.created_at, a.updated_at`
+                     a.bandwidth_reset_at, a.notes, a.created_at, a.updated_at`
 
 func scanAccount(row pgx.Row) (*models.Account, error) {
 	var a models.Account
 	err := row.Scan(&a.ID, &a.OwnerID, &a.PlanID, &a.SystemUser, &a.PrimaryDomain,
 		&a.Status, &a.SuspendReason, &a.DiskUsedMB, &a.BandwidthUsedMB,
-		&a.Notes, &a.CreatedAt, &a.UpdatedAt)
+		&a.BandwidthResetAt, &a.Notes, &a.CreatedAt, &a.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -152,8 +152,8 @@ func (s *Store) ListAccounts(ctx context.Context, scopeOwner *uuid.UUID) ([]mode
 	for rows.Next() {
 		var a models.Account
 		if err := rows.Scan(&a.ID, &a.OwnerID, &a.PlanID, &a.SystemUser, &a.PrimaryDomain,
-			&a.Status, &a.SuspendReason, &a.DiskUsedMB, &a.BandwidthUsedMB, &a.Notes,
-			&a.CreatedAt, &a.UpdatedAt, &a.OwnerLogin, &a.SiteCount); err != nil {
+			&a.Status, &a.SuspendReason, &a.DiskUsedMB, &a.BandwidthUsedMB, &a.BandwidthResetAt,
+			&a.Notes, &a.CreatedAt, &a.UpdatedAt, &a.OwnerLogin, &a.SiteCount); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
@@ -187,10 +187,28 @@ func (s *Store) UpdateAccountPlan(ctx context.Context, id, planID uuid.UUID) err
 	return nil
 }
 
-func (s *Store) UpdateAccountUsage(ctx context.Context, id uuid.UUID, diskMB, bwMB int64) error {
+// UpdateAccountDiskUsage guarda el uso de disco recién medido (recalculado
+// periódicamente caminando el árbol de archivos de la cuenta).
+func (s *Store) UpdateAccountDiskUsage(ctx context.Context, id uuid.UUID, mb int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE accounts SET disk_used_mb=$2, updated_at=now() WHERE id=$1`, id, mb)
+	return err
+}
+
+// AddAccountBandwidthUsage acumula tráfico (delta desde el último muestreo)
+// al contador mensual de la cuenta.
+func (s *Store) AddAccountBandwidthUsage(ctx context.Context, id uuid.UUID, deltaMB int64) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE accounts SET bandwidth_used_mb = bandwidth_used_mb + $2, updated_at=now() WHERE id=$1`,
+		id, deltaMB)
+	return err
+}
+
+// ResetAccountBandwidthUsage reinicia el contador mensual de transferencia.
+func (s *Store) ResetAccountBandwidthUsage(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE accounts SET disk_used_mb=$2, bandwidth_used_mb=$3, updated_at=now()
-		WHERE id=$1`, id, diskMB, bwMB)
+		UPDATE accounts SET bandwidth_used_mb=0, bandwidth_reset_at=now(), updated_at=now()
+		WHERE id=$1`, id)
 	return err
 }
 

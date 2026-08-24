@@ -32,6 +32,7 @@ func (r *Runner) Start(ctx context.Context) {
 	go r.housekeepingLoop(ctx)
 	go r.backupLoop(ctx)
 	go r.wafLogLoop(ctx)
+	go r.quotaLoop(ctx)
 }
 
 // metricsLoop guarda una muestra de CPU/memoria por sitio en ejecución.
@@ -215,6 +216,133 @@ func (r *Runner) backupLoop(ctx context.Context) {
 					continue
 				}
 				slog.Info("backup de cuenta completado", "account", acct.SystemUser)
+			}
+		}
+	}
+}
+
+// quotaInterval separa cada recálculo de cuotas: caminar el árbol de
+// archivos de cada cuenta es más costoso que el resto de los bucles, así que
+// corre con menos frecuencia que metricsLoop.
+const quotaInterval = 15 * time.Minute
+
+// quotaLoop recalcula disco y transferencia usados por cada cuenta activa y
+// aplica lo que no se hace en el camino caliente de la API: disco solo se
+// mide aquí (los handlers de archivos leen el valor ya calculado para
+// bloquear subidas), y transferencia se acumula y compara contra la cuota
+// mensual del plan, suspendiendo la cuenta automáticamente si se supera.
+func (r *Runner) quotaLoop(ctx context.Context) {
+	ticker := time.NewTicker(quotaInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.enforceQuotas(ctx)
+		}
+	}
+}
+
+func (r *Runner) enforceQuotas(ctx context.Context) {
+	accounts, err := r.st.ListAccounts(ctx, nil)
+	if err != nil {
+		slog.Warn("cuotas: no se pudieron listar las cuentas", "error", err)
+		return
+	}
+	for _, acct := range accounts {
+		if acct.Status == models.AccountTerminated {
+			continue
+		}
+		plan, err := r.st.GetPlan(ctx, acct.PlanID)
+		if err != nil {
+			continue
+		}
+
+		// --- Disco: solo se mide; el bloqueo de nuevas escrituras ocurre en
+		// los handlers de archivos, comparando contra el valor que se guarda aquí.
+		if diskMB, err := r.svc.AccountDiskUsageMB(acct.SystemUser); err == nil {
+			if err := r.st.UpdateAccountDiskUsage(ctx, acct.ID, diskMB); err != nil {
+				slog.Warn("cuotas: no se pudo guardar el uso de disco",
+					"account", acct.SystemUser, "error", err)
+			}
+		} else {
+			slog.Warn("cuotas: no se pudo medir el uso de disco",
+				"account", acct.SystemUser, "error", err)
+		}
+
+		// --- Transferencia: se acumula un delta por sitio desde la última
+		// lectura (Docker solo da tráfico acumulado desde que arrancó el
+		// contenedor, así que un reinicio hace que el contador vuelva a 0).
+		sites, err := r.st.ListSites(ctx, &acct.ID)
+		if err != nil {
+			continue
+		}
+		var deltaMB float64
+		for _, site := range sites {
+			if site.Status != models.SiteRunning {
+				continue
+			}
+			stats, err := r.svc.Docker().Stats(ctx, site.ContainerName)
+			if err != nil {
+				continue
+			}
+			cumulative := stats.NetRxMB + stats.NetTxMB
+			baseRx, baseTx, err := r.st.GetSiteNetBaseline(ctx, site.ID)
+			if err != nil {
+				continue
+			}
+			baseline := baseRx + baseTx
+			if cumulative >= baseline {
+				deltaMB += cumulative - baseline
+			} else {
+				// El contenedor se reinició: el contador de Docker volvió a 0.
+				deltaMB += cumulative
+			}
+			if err := r.st.SetSiteNetBaseline(ctx, site.ID, stats.NetRxMB, stats.NetTxMB); err != nil {
+				slog.Warn("cuotas: no se pudo guardar la referencia de tráfico",
+					"site", site.Name, "error", err)
+			}
+		}
+
+		// Reinicio mensual del contador de transferencia.
+		if acct.BandwidthResetAt.Format("2006-01") != time.Now().Format("2006-01") {
+			if err := r.st.ResetAccountBandwidthUsage(ctx, acct.ID); err != nil {
+				slog.Warn("cuotas: no se pudo reiniciar la transferencia mensual",
+					"account", acct.SystemUser, "error", err)
+			} else {
+				acct.BandwidthUsedMB = 0
+				if acct.Status == models.AccountSuspended && acct.SuspendReason == provision.AutoSuspendBandwidthReason {
+					if err := r.svc.UnsuspendAccount(ctx, acct.ID); err != nil {
+						slog.Warn("cuotas: no se pudo reactivar la cuenta tras el reinicio mensual",
+							"account", acct.SystemUser, "error", err)
+					} else {
+						acct.Status = models.AccountActive
+						slog.Info("cuenta reactivada: nuevo ciclo mensual de transferencia",
+							"account", acct.SystemUser)
+					}
+				}
+			}
+		}
+
+		if deltaMB > 0 {
+			if err := r.st.AddAccountBandwidthUsage(ctx, acct.ID, int64(deltaMB)); err != nil {
+				slog.Warn("cuotas: no se pudo acumular la transferencia",
+					"account", acct.SystemUser, "error", err)
+			} else {
+				acct.BandwidthUsedMB += int64(deltaMB)
+			}
+		}
+
+		if acct.Status == models.AccountActive && plan.BandwidthQuotaMB > 0 &&
+			acct.BandwidthUsedMB >= plan.BandwidthQuotaMB {
+			if err := r.svc.SuspendAccount(ctx, acct.ID, provision.AutoSuspendBandwidthReason); err != nil {
+				slog.Warn("cuotas: no se pudo suspender la cuenta por exceso de transferencia",
+					"account", acct.SystemUser, "error", err)
+			} else {
+				slog.Warn("cuenta suspendida automáticamente: superó la cuota de transferencia",
+					"account", acct.SystemUser, "used_mb", acct.BandwidthUsedMB, "quota_mb", plan.BandwidthQuotaMB)
 			}
 		}
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -11,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/etasoft/gocontrolpanel/internal/auth"
 	"github.com/etasoft/gocontrolpanel/internal/httpx"
@@ -31,21 +34,41 @@ type fileEntry struct {
 }
 
 // accountFilesRoot resuelve la cuenta del path, comprueba que el usuario
-// autenticado tenga acceso, y devuelve la raíz de sus archivos en el host.
-func (s *Server) accountFilesRoot(w http.ResponseWriter, r *http.Request) (string, bool) {
+// autenticado tenga acceso, y devuelve la raíz de sus archivos en el host
+// junto con el ID de cuenta (lo necesitan los handlers que escriben, para
+// comprobar la cuota de disco antes de guardar nada).
+func (s *Server) accountFilesRoot(w http.ResponseWriter, r *http.Request) (string, uuid.UUID, bool) {
 	accountID, err := pathUUID(r, "accountID")
 	if err != nil {
 		httpx.Error(w, http.StatusBadRequest, "id de cuenta inválido")
-		return "", false
+		return "", uuid.Nil, false
 	}
 	id := auth.MustIdentity(r.Context())
 	acct, err := s.authorizeAccount(r.Context(), id, accountID)
 	if err != nil {
 		writeStoreError(w, err)
-		return "", false
+		return "", uuid.Nil, false
 	}
-	return filepath.Join(s.cfg.SitesRoot, acct.SystemUser), true
+	return filepath.Join(s.cfg.SitesRoot, acct.SystemUser), acct.ID, true
 }
+
+// diskQuotaExceeded compara el último uso de disco calculado (el worker de
+// cuotas lo recalcula cada 15 min, no en cada petición: caminar el árbol de
+// archivos es demasiado costoso para el camino caliente) contra la cuota del
+// plan. Un plan con cuota 0 se trata como "sin cuota" (nunca bloquea).
+func (s *Server) diskQuotaExceeded(ctx context.Context, accountID uuid.UUID) bool {
+	acct, err := s.st.GetAccount(ctx, accountID)
+	if err != nil {
+		return false
+	}
+	plan, err := s.st.GetPlan(ctx, acct.PlanID)
+	if err != nil {
+		return false
+	}
+	return plan.DiskQuotaMB > 0 && acct.DiskUsedMB >= plan.DiskQuotaMB
+}
+
+const errDiskQuotaExceeded = "la cuenta superó la cuota de disco del plan; libera espacio antes de subir más archivos"
 
 // safePath ancla rel dentro de root. Se limpia como si colgara de una raíz
 // virtual "/" —donde ".." no puede subir más allá de esa raíz— y solo
@@ -69,7 +92,7 @@ func toRelative(root, full string) string {
 }
 
 func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, _, ok := s.accountFilesRoot(w, r)
 	if !ok {
 		return
 	}
@@ -109,8 +132,12 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleUploadFiles(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, accountID, ok := s.accountFilesRoot(w, r)
 	if !ok {
+		return
+	}
+	if s.diskQuotaExceeded(r.Context(), accountID) {
+		httpx.Error(w, http.StatusForbidden, errDiskQuotaExceeded)
 		return
 	}
 	dir, err := safePath(root, r.URL.Query().Get("path"))
@@ -171,7 +198,7 @@ func saveUploadedFile(fh *multipart.FileHeader, dest string) error {
 }
 
 func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, _, ok := s.accountFilesRoot(w, r)
 	if !ok {
 		return
 	}
@@ -195,7 +222,7 @@ func (s *Server) handleDownloadFile(w http.ResponseWriter, r *http.Request) {
 const maxEditableBytes = 4 << 20 // 4 MB
 
 func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, _, ok := s.accountFilesRoot(w, r)
 	if !ok {
 		return
 	}
@@ -227,8 +254,12 @@ func (s *Server) handleReadFileContent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWriteFileContent(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, accountID, ok := s.accountFilesRoot(w, r)
 	if !ok {
+		return
+	}
+	if s.diskQuotaExceeded(r.Context(), accountID) {
+		httpx.Error(w, http.StatusForbidden, errDiskQuotaExceeded)
 		return
 	}
 	full, err := safePath(root, r.URL.Query().Get("path"))
@@ -273,7 +304,7 @@ func looksBinary(data []byte) bool {
 }
 
 func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, _, ok := s.accountFilesRoot(w, r)
 	if !ok {
 		return
 	}
@@ -303,7 +334,7 @@ type mkdirRequest struct {
 }
 
 func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, _, ok := s.accountFilesRoot(w, r)
 	if !ok {
 		return
 	}
@@ -334,7 +365,7 @@ type renameRequest struct {
 }
 
 func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, _, ok := s.accountFilesRoot(w, r)
 	if !ok {
 		return
 	}
@@ -373,8 +404,12 @@ func (s *Server) handleRenameFile(w http.ResponseWriter, r *http.Request) {
 // para blindarse de "zip slip" (entradas con ".." que intenten escribir
 // fuera de esa carpeta).
 func (s *Server) handleExtractZip(w http.ResponseWriter, r *http.Request) {
-	root, ok := s.accountFilesRoot(w, r)
+	root, accountID, ok := s.accountFilesRoot(w, r)
 	if !ok {
+		return
+	}
+	if s.diskQuotaExceeded(r.Context(), accountID) {
+		httpx.Error(w, http.StatusForbidden, errDiskQuotaExceeded)
 		return
 	}
 	full, err := safePath(root, r.URL.Query().Get("path"))

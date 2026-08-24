@@ -79,18 +79,19 @@ const (
 )
 
 type Account struct {
-	ID              uuid.UUID     `json:"id"`
-	OwnerID         uuid.UUID     `json:"owner_id"`
-	PlanID          uuid.UUID     `json:"plan_id"`
-	SystemUser      string        `json:"system_user"`
-	PrimaryDomain   string        `json:"primary_domain"`
-	Status          AccountStatus `json:"status"`
-	SuspendReason   string        `json:"suspend_reason"`
-	DiskUsedMB      int64         `json:"disk_used_mb"`
-	BandwidthUsedMB int64         `json:"bandwidth_used_mb"`
-	Notes           string        `json:"notes"`
-	CreatedAt       time.Time     `json:"created_at"`
-	UpdatedAt       time.Time     `json:"updated_at"`
+	ID               uuid.UUID     `json:"id"`
+	OwnerID          uuid.UUID     `json:"owner_id"`
+	PlanID           uuid.UUID     `json:"plan_id"`
+	SystemUser       string        `json:"system_user"`
+	PrimaryDomain    string        `json:"primary_domain"`
+	Status           AccountStatus `json:"status"`
+	SuspendReason    string        `json:"suspend_reason"`
+	DiskUsedMB       int64         `json:"disk_used_mb"`
+	BandwidthUsedMB  int64         `json:"bandwidth_used_mb"`
+	BandwidthResetAt time.Time     `json:"bandwidth_reset_at"`
+	Notes            string        `json:"notes"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
 
 	// Campos calculados para la API (no persistidos).
 	Plan       *Plan  `json:"plan,omitempty"`
