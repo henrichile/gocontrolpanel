@@ -9,6 +9,7 @@ import {
 } from '../components'
 import { FileManager } from '../filemanager'
 import { Icon } from '../icons'
+import { MailTab } from '../mailtab'
 import { errorMessage, useToast } from '../toast'
 
 // Panel de hosting del cliente: mismo tipo de datos que la vista de
@@ -34,7 +35,7 @@ export default function AccountPanel() {
   const [sftpHost, setSftpHost] = useState('')
   const [sftpPort, setSftpPort] = useState(0)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'sitios' | 'archivos' | 'bases' | 'sftp' | 'backups'>('sitios')
+  const [tab, setTab] = useState<'sitios' | 'archivos' | 'bases' | 'sftp' | 'correo' | 'backups'>('sitios')
   const [backups, setBackups] = useState<BackupFile[]>([])
   const [backingUp, setBackingUp] = useState(false)
   const [creatingSite, setCreatingSite] = useState(false)
@@ -217,6 +218,9 @@ export default function AccountPanel() {
         <button className={tab === 'sftp' ? 'active' : ''} onClick={() => setTab('sftp')}>
           Acceso SFTP
         </button>
+        <button className={tab === 'correo' ? 'active' : ''} onClick={() => setTab('correo')}>
+          Correo
+        </button>
         <button className={tab === 'backups' ? 'active' : ''} onClick={() => setTab('backups')}>
           Backups
         </button>
@@ -307,6 +311,13 @@ export default function AccountPanel() {
             </table>
           )}
         </Card>
+      )}
+
+      {tab === 'correo' && (
+        <MailTab
+          accountID={account.id}
+          siteDomains={Array.from(new Set(sites.flatMap((s) => s.domains?.map((d) => d.fqdn) ?? [])))}
+        />
       )}
 
       {tab === 'backups' && (

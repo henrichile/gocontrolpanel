@@ -44,6 +44,7 @@ type Plan struct {
 	MaxFTPAccounts   int       `json:"max_ftp_accounts"`
 	MaxCronJobs      int       `json:"max_cron_jobs"`
 	MaxDomains       int       `json:"max_domains"`
+	MaxMailboxes     int       `json:"max_mailboxes"`
 	CPULimit         float64   `json:"cpu_limit"`
 	MemoryLimitMB    int64     `json:"memory_limit_mb"`
 	PHPVersions      []string  `json:"php_versions"`
@@ -150,6 +151,30 @@ type Domain struct {
 	ForceHTTPS bool       `json:"force_https"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+}
+
+// MailDomain marca un dominio de una cuenta como habilitado para correo
+// propio (buzones): existe una fila aquí después de generar sus claves DKIM.
+type MailDomain struct {
+	ID            uuid.UUID  `json:"id"`
+	AccountID     uuid.UUID  `json:"account_id"`
+	Domain        string     `json:"domain"`
+	DKIMSelector  string     `json:"dkim_selector"`
+	DKIMValue     string     `json:"dkim_value"`
+	DKIMEnabledAt *time.Time `json:"dkim_enabled_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+}
+
+type Mailbox struct {
+	ID           uuid.UUID `json:"id"`
+	AccountID    uuid.UUID `json:"account_id"`
+	MailDomainID uuid.UUID `json:"mail_domain_id"`
+	LocalPart    string    `json:"local_part"`
+	QuotaMB      int64     `json:"quota_mb"`
+	CreatedAt    time.Time `json:"created_at"`
+
+	// Campos calculados para la API (no persistidos).
+	Domain string `json:"domain,omitempty"`
 }
 
 type SiteDatabase struct {

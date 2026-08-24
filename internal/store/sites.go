@@ -224,6 +224,19 @@ func (s *Store) GetDomain(ctx context.Context, id uuid.UUID) (*models.Domain, er
 	return &d, err
 }
 
+// DomainBelongsToAccount confirma que fqdn es un dominio de algún sitio de la
+// cuenta — se usa antes de habilitar correo para un dominio, para que un
+// cliente no pueda pedir buzones sobre un dominio que no es suyo.
+func (s *Store) DomainBelongsToAccount(ctx context.Context, accountID uuid.UUID, fqdn string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM domains d JOIN sites si ON si.id = d.site_id
+			WHERE si.account_id=$1 AND d.fqdn=$2
+		)`, accountID, fqdn).Scan(&exists)
+	return exists, err
+}
+
 func (s *Store) DeleteDomain(ctx context.Context, id uuid.UUID) error {
 	ct, err := s.pool.Exec(ctx, `DELETE FROM domains WHERE id=$1`, id)
 	if err != nil {

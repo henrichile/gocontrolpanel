@@ -13,6 +13,7 @@ const emptyPlan = {
   max_ftp_accounts: 3,
   max_cron_jobs: 5,
   max_domains: 5,
+  max_mailboxes: 5,
   cpu_limit: 1,
   memory_limit_mb: 512,
   php_versions: ['8.3', '8.4'],
@@ -82,13 +83,13 @@ export default function Plans() {
           <table>
             <thead>
               <tr>
-                <th>Plan</th><th>Disco</th><th>Sitios</th><th>Bases</th><th>Dominios</th>
+                <th>Plan</th><th>Disco</th><th>Sitios</th><th>Bases</th><th>Dominios</th><th>Buzones</th>
                 <th>CPU</th><th>RAM</th><th>PHP</th><th></th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <SkeletonRows cols={9} />
+                <SkeletonRows cols={10} />
               ) : (
                 visible.map((p) => (
                   <tr key={p.id}>
@@ -99,6 +100,7 @@ export default function Plans() {
                     <td>{p.max_sites}</td>
                     <td>{p.max_databases}</td>
                     <td>{p.max_domains}</td>
+                    <td>{p.max_mailboxes}</td>
                     <td>{p.cpu_limit}</td>
                     <td>{p.memory_limit_mb} MB</td>
                     <td className="muted">{p.php_versions.join(', ')}</td>
@@ -205,6 +207,10 @@ function PlanModal({ plan, onClose, onSaved }: {
           <div className="field">
             <label htmlFor="domains">Máx. dominios</label>
             <input id="domains" type="number" value={form.max_domains} onChange={num('max_domains')} />
+          </div>
+          <div className="field">
+            <label htmlFor="mailboxes">Máx. buzones de correo</label>
+            <input id="mailboxes" type="number" value={form.max_mailboxes} onChange={num('max_mailboxes')} />
           </div>
         </div>
 

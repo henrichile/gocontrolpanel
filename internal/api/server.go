@@ -145,6 +145,16 @@ func (s *Server) Handler() http.Handler {
 			r.Post("/accounts/{accountID}/ftp", s.handleCreateFTP)
 			r.Delete("/ftp/{ftpID}", s.handleDeleteFTP)
 
+			// Correo propio de dominios de clientes (buzones + webmail)
+			r.Get("/mail/info", s.handleMailInfo)
+			r.Get("/accounts/{accountID}/mail/domains", s.handleListMailDomains)
+			r.Post("/accounts/{accountID}/mail/domains/{domain}/enable", s.handleEnableMailDomain)
+			r.Post("/accounts/{accountID}/mail/domains/{domain}/verify", s.handleVerifyMailDomain)
+			r.Get("/accounts/{accountID}/mail/mailboxes", s.handleListMailboxes)
+			r.Post("/accounts/{accountID}/mail/mailboxes", s.handleCreateMailbox)
+			r.Delete("/mail/mailboxes/{mailboxID}", s.handleDeleteMailbox)
+			r.Post("/mail/mailboxes/{mailboxID}/password", s.handleChangeMailboxPassword)
+
 			// Backups (archivos + bases de datos) por cuenta
 			r.Get("/accounts/{accountID}/backups", s.handleListBackups)
 			r.Post("/accounts/{accountID}/backups", s.handleCreateBackup)

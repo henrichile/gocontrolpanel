@@ -114,7 +114,16 @@ func run() error {
 		slog.Warn("SFTP no configurado; el acceso por SFTP a las cuentas quedará desactivado")
 	}
 
-	svc := provision.New(cfg, st, docker, caddy, mysqlMgr, sftpMgr)
+	mailHostname := cfg.MailHostname
+	if mailHostname == "" {
+		mailHostname = "mail." + provision.PanelHost(cfg.PublicURL)
+	}
+	mailMgr := provision.NewMailManager(docker, cfg.MailEnabled, cfg.MailContainerName, mailHostname)
+	if cfg.MailEnabled && mailMgr == nil {
+		slog.Warn("correo habilitado pero sin hostname configurado; la gestión de buzones quedará desactivada")
+	}
+
+	svc := provision.New(cfg, st, docker, caddy, mysqlMgr, sftpMgr, mailMgr)
 
 	if cmd == "synccaddy" {
 		if err := svc.SyncCaddy(ctx); err != nil {

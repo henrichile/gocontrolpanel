@@ -180,6 +180,7 @@ export interface Plan {
   max_ftp_accounts: number
   max_cron_jobs: number
   max_domains: number
+  max_mailboxes: number
   cpu_limit: number
   memory_limit_mb: number
   php_versions: string[]
@@ -362,6 +363,44 @@ export interface FirewallStatus {
   rules?: FirewallRule[]
   protected_port?: number
   error?: string
+}
+
+export interface MailDomain {
+  id: string
+  account_id: string
+  domain: string
+  dkim_selector: string
+  dkim_value: string
+  dkim_enabled_at?: string
+  created_at: string
+}
+
+export interface DKIMRecord {
+  selector: string
+  name: string
+  value: string
+}
+
+export interface MailDNSRecords {
+  mx: string
+  spf: string
+  dkim: DKIMRecord
+  dmarc: string
+}
+
+export interface Mailbox {
+  id: string
+  account_id: string
+  mail_domain_id: string
+  local_part: string
+  quota_mb: number
+  created_at: string
+  domain?: string
+}
+
+export interface MailInfo {
+  enabled: boolean
+  webmail_host?: string
 }
 
 export interface WAFBlock {

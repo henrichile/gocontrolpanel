@@ -831,6 +831,24 @@ recoger_datos() {
     else
         validar_password "$GOCP_ADMIN_PASSWORD" || morir "La contraseña del administrador es demasiado corta."
     fi
+
+    # Correo gestionado (opcional): abre los puertos 25/465/587/993 y necesita
+    # que el operador ya haya configurado el PTR/rDNS del servidor — por eso
+    # el default es "no" incluso en modo interactivo, a diferencia del resto
+    # de preguntas de esta función.
+    GOCP_MAIL_ENABLED="${GOCP_MAIL_ENABLED:-false}"
+    if [[ $UNATTENDED -eq 0 && "$GOCP_MAIL_ENABLED" != "true" ]]; then
+        local respuesta_correo
+        read -r -p "  ¿Habilitar correo para los dominios de clientes? (requiere puerto 25 saliente y PTR configurado) [s/N]: " \
+            respuesta_correo </dev/tty || true
+        if [[ "$respuesta_correo" =~ ^[SsYy] ]]; then
+            GOCP_MAIL_ENABLED="true"
+        fi
+    fi
+    if [[ "$GOCP_MAIL_ENABLED" == "true" ]]; then
+        preguntar GOCP_MAIL_HOSTNAME "Hostname del servidor de correo (MX compartido por todos los dominios)" \
+            "mail.${GOCP_DOMAIN}" validar_dominio
+    fi
 }
  
 generar_secreto() {
@@ -854,6 +872,7 @@ escribir_env() {
         JWT_SECRET="$(grep -E '^GOCP_JWT_SECRET=' "$env_file" | cut -d= -f2- || true)"
         GOCP_SFTP_ADMIN_USER="$(grep -E '^GOCP_SFTP_ADMIN_USER=' "$env_file" | cut -d= -f2- || true)"
         GOCP_SFTP_ADMIN_PASSWORD="$(grep -E '^GOCP_SFTP_ADMIN_PASSWORD=' "$env_file" | cut -d= -f2- || true)"
+        GOCP_ROUNDCUBE_DES_KEY="$(grep -E '^GOCP_ROUNDCUBE_DES_KEY=' "$env_file" | cut -d= -f2- || true)"
     fi
 
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-$(generar_secreto 32)}"
@@ -863,6 +882,10 @@ escribir_env() {
     # usuarios SFTP de cada cuenta, que crea el panel dinámicamente).
     GOCP_SFTP_ADMIN_USER="${GOCP_SFTP_ADMIN_USER:-gocp-admin}"
     GOCP_SFTP_ADMIN_PASSWORD="${GOCP_SFTP_ADMIN_PASSWORD:-$(generar_secreto 32)}"
+    # Cifra las credenciales IMAP que Roundcube guarda en la sesión del
+    # navegador; se genera siempre (aunque el correo esté deshabilitado) para
+    # no complicar la lógica condicional — no se usa si GOCP_MAIL_ENABLED=false.
+    GOCP_ROUNDCUBE_DES_KEY="${GOCP_ROUNDCUBE_DES_KEY:-$(generar_secreto 24)}"
 
     # El panel corre como usuario "nonroot" dentro del contenedor y necesita
     # el GID del grupo dueño de /var/run/docker.sock para poder hablar con el
@@ -906,6 +929,10 @@ GOCP_SFTP_ADMIN_USER=${GOCP_SFTP_ADMIN_USER}
 GOCP_SFTP_ADMIN_PASSWORD=${GOCP_SFTP_ADMIN_PASSWORD}
 GOCP_SFTP_PUBLIC_HOST=${GOCP_DOMAIN}
 GOCP_SFTP_PUBLIC_PORT=2022
+
+GOCP_MAIL_ENABLED=${GOCP_MAIL_ENABLED:-false}
+GOCP_MAIL_HOSTNAME=${GOCP_MAIL_HOSTNAME:-}
+GOCP_ROUNDCUBE_DES_KEY=${GOCP_ROUNDCUBE_DES_KEY}
 
 GOCP_CADDY_EMAIL=${GOCP_EMAIL}
  
@@ -993,22 +1020,29 @@ construir_imagenes() {
 }
  
 levantar_plataforma() {
+    # El perfil "mail" (docker-mailserver + Roundcube) solo se levanta si el
+    # operador lo confirmó en recoger_datos — abre puertos públicos nuevos
+    # (25/465/587/993) y no todas las instalaciones lo quieren.
+    local perfiles=()
+    [[ "${GOCP_MAIL_ENABLED:-false}" == "true" ]] && perfiles=(--profile mail)
+
     if [[ $DRY_RUN -eq 1 ]]; then
-        printf '%s    [simulación] docker compose up -d --build%s\n' "$C_DIM" "$C_RESET"
+        printf '%s    [simulación] docker compose %s up -d --build%s\n' \
+            "$C_DIM" "${perfiles[*]:-}" "$C_RESET"
         return 0
     fi
- 
+
     # Validar antes de construir: si falta una variable o el YAML está mal, es
     # mejor saberlo ahora que tras varios minutos de compilación.
     local salida_config
-    if ! salida_config=$( ( cd "$GOCP_INSTALL_DIR" && docker compose config -q ) 2>&1 ); then
+    if ! salida_config=$( ( cd "$GOCP_INSTALL_DIR" && docker compose "${perfiles[@]}" config -q ) 2>&1 ); then
         morir "La configuración de docker compose no es válida: $salida_config" \
               "Revisa $GOCP_INSTALL_DIR/docker-compose.yml y $GOCP_INSTALL_DIR/.env"
     fi
     ok "Configuración de Docker Compose validada"
- 
+
     info "Construyendo el panel y levantando los servicios…"
-    ( cd "$GOCP_INSTALL_DIR" && docker compose up -d --build ) >>"$LOG_FILE" 2>&1 \
+    ( cd "$GOCP_INSTALL_DIR" && docker compose "${perfiles[@]}" up -d --build ) >>"$LOG_FILE" 2>&1 \
         || morir "docker compose falló. Revisa $LOG_FILE" \
                  "También puedes ver los logs con: cd $GOCP_INSTALL_DIR && docker compose logs"
     ok "Servicios en marcha"
@@ -1116,6 +1150,17 @@ resumen_final() {
             "$C_BOLD" "$C_RESET" "$GOCP_DOMAIN"
     fi
  
+    if [[ "${GOCP_MAIL_ENABLED:-false}" == "true" ]]; then
+        printf '\n  %sCorreo habilitado (%s):%s\n' "$C_BOLD" "$GOCP_MAIL_HOSTNAME" "$C_RESET"
+        printf '    1. Crea un registro %sA%s para %s apuntando a la IP de este servidor.\n' \
+            "$C_BOLD" "$C_RESET" "$GOCP_MAIL_HOSTNAME"
+        printf '    2. Configura el %sPTR/rDNS%s de esa IP apuntando exactamente a %s.\n' \
+            "$C_BOLD" "$C_RESET" "$GOCP_MAIL_HOSTNAME"
+        printf '       (sin esto, la mayoría de proveedores de correo marcan tus envíos como spam)\n'
+        printf '    3. Desde cada cuenta → pestaña Correo, habilita el dominio del cliente y publica\n'
+        printf '       los registros MX/SPF/DKIM/DMARC que te muestre el panel en su proveedor DNS.\n'
+    fi
+
     printf '\n  %sAntes de dar de alta clientes reales, revisa docs/07-seguridad.md:%s\n' \
         "$C_DIM" "$C_RESET"
     printf '  %sel panel tiene acceso al socket de Docker, que equivale a root en el host.%s\n\n' \

@@ -105,6 +105,11 @@ type BuildOptions struct {
 	// Dominio del propio panel; se enruta al backend Go.
 	PanelHost     string
 	PanelUpstream string
+	// Webmail (Roundcube), si el correo gestionado está habilitado. Mismo
+	// tratamiento que PanelHost: ruta fija + certificado ACME explícito, no
+	// on-demand.
+	WebmailHost     string
+	WebmailUpstream string
 	// Página estática que se sirve cuando un sitio está detenido.
 	MaintenanceMessage string
 
@@ -150,6 +155,20 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 		})
 	}
 
+	// Webmail, igual tratamiento que el panel: ruta fija que ningún vhost de
+	// cliente puede tapar.
+	if opt.WebmailHost != "" && opt.WebmailUpstream != "" {
+		h, err := reverseProxyHandler(opt.WebmailUpstream, true)
+		if err != nil {
+			return nil, err
+		}
+		srv.Routes = append(srv.Routes, Route{
+			Match:    []Match{{Host: []string{opt.WebmailHost}}},
+			Handle:   []json.RawMessage{h},
+			Terminal: true,
+		})
+	}
+
 	// Orden estable: evita recargas espurias de Caddy cuando nada cambió.
 	sorted := make([]SiteRoute, len(routes))
 	copy(sorted, routes)
@@ -164,6 +183,9 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 	subjects := []string{}
 	if opt.PanelHost != "" {
 		subjects = append(subjects, opt.PanelHost)
+	}
+	if opt.WebmailHost != "" {
+		subjects = append(subjects, opt.WebmailHost)
 	}
 	for _, r := range sorted {
 		if len(r.Hosts) == 0 {
@@ -245,7 +267,7 @@ func Build(routes []SiteRoute, opt BuildOptions) (*Config, error) {
 		}
 		if opt.OnDemandAskURL != "" {
 			perm, err := json.Marshal(map[string]any{
-				"module": "http",
+				"module":   "http",
 				"endpoint": opt.OnDemandAskURL,
 			})
 			if err != nil {
@@ -274,8 +296,8 @@ func reverseProxyHandler(upstream string, panel bool) (json.RawMessage, error) {
 			},
 		},
 		"transport": map[string]any{
-			"protocol":         "http",
-			"dial_timeout":     "10s",
+			"protocol":                "http",
+			"dial_timeout":            "10s",
 			"response_header_timeout": "120s",
 		},
 	}

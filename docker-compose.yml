@@ -97,6 +97,13 @@ services:
       GOCP_SFTP_ADMIN_PASSWORD: ${GOCP_SFTP_ADMIN_PASSWORD:-}
       GOCP_SFTP_PUBLIC_HOST: ${GOCP_SFTP_PUBLIC_HOST:-}
       GOCP_SFTP_PUBLIC_PORT: ${GOCP_SFTP_PUBLIC_PORT:-2022}
+      # Correo gestionado (opcional, perfil "mail"): si GOCP_MAIL_ENABLED
+      # queda en false, el panel funciona igual y solo oculta la sección de
+      # correo — no depende de que el contenedor mailserver exista.
+      GOCP_MAIL_ENABLED: ${GOCP_MAIL_ENABLED:-false}
+      GOCP_MAIL_CONTAINER_NAME: gocp-mailserver
+      GOCP_MAIL_HOSTNAME: ${GOCP_MAIL_HOSTNAME:-}
+      GOCP_MAIL_WEBMAIL_UPSTREAM: http://roundcube:80
       GOCP_ADMIN_USER: ${GOCP_ADMIN_USER:-admin}
       GOCP_ADMIN_EMAIL: ${GOCP_ADMIN_EMAIL:-admin@localhost}
       GOCP_ADMIN_PASSWORD: ${GOCP_ADMIN_PASSWORD:-}
@@ -219,6 +226,74 @@ services:
     networks:
       - sites
 
+  # --- Correo gestionado (opcional, perfil "mail") --------------------------
+  # Buzones reales por dominio de cliente. Se administra por "docker exec"
+  # (setup.sh dentro del contenedor, ver internal/provision/mail.go), no por
+  # una API HTTP propia. Requiere que el operador haya configurado el PTR/rDNS
+  # del servidor apuntando a GOCP_MAIL_HOSTNAME y tenga el puerto 25 saliente
+  # abierto — install.sh solo levanta este perfil si el operador lo confirmó.
+  mailserver:
+    image: docker.io/mailserver/docker-mailserver:latest
+    container_name: gocp-mailserver
+    hostname: ${GOCP_MAIL_HOSTNAME:-}
+    restart: unless-stopped
+    profiles: ["mail"]
+    depends_on:
+      volumes-init:
+        condition: service_completed_successfully
+    environment:
+      OVERRIDE_HOSTNAME: ${GOCP_MAIL_HOSTNAME:-}
+      POSTMASTER_ADDRESS: postmaster@${GOCP_MAIL_HOSTNAME:-localhost}
+      ENABLE_RSPAMD: 1
+      ENABLE_OPENDKIM: 1
+      ENABLE_OPENDMARC: 1
+      ENABLE_POP3: 0
+      ONE_DIR: 1
+      PERMIT_DOCKER: network
+      # Los certificados los emite y renueva Caddy (mismo dominio, ver
+      # internal/caddyapi WebmailHost/PanelHost); aquí solo se consumen desde
+      # el volumen que Caddy ya usa para guardarlos, montado de solo lectura.
+      SSL_TYPE: manual
+      SSL_CERT_PATH: /caddy-certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${GOCP_MAIL_HOSTNAME:-}/${GOCP_MAIL_HOSTNAME:-}.crt
+      SSL_KEY_PATH: /caddy-certs/caddy/certificates/acme-v02.api.letsencrypt.org-directory/${GOCP_MAIL_HOSTNAME:-}/${GOCP_MAIL_HOSTNAME:-}.key
+    ports:
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      - "993:993"
+    volumes:
+      - mail_data:/var/mail
+      - mail_state:/var/mail-state
+      - mail_config:/tmp/docker-mailserver
+      - caddy_data:/caddy-certs:ro
+      - /etc/localtime:/etc/localtime:ro
+    networks:
+      - sites
+    healthcheck:
+      test: ["CMD", "ss", "-lnt", "sport", "=", ":25"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  roundcube:
+    image: roundcube/roundcube:latest
+    container_name: gocp-roundcube
+    restart: unless-stopped
+    profiles: ["mail"]
+    depends_on:
+      - mailserver
+    environment:
+      ROUNDCUBEMAIL_DB_TYPE: sqlite
+      ROUNDCUBEMAIL_DEFAULT_HOST: tls://mailserver
+      ROUNDCUBEMAIL_DEFAULT_PORT: 993
+      ROUNDCUBEMAIL_SMTP_SERVER: tls://mailserver
+      ROUNDCUBEMAIL_SMTP_PORT: 587
+      ROUNDCUBEMAIL_DES_KEY: ${GOCP_ROUNDCUBE_DES_KEY:?falta la clave de Roundcube; vuelve a ejecutar install.sh}
+    volumes:
+      - roundcube_data:/var/www/html
+    networks:
+      - sites
+
 networks:
   sites:
     name: gocontrolpanel_sites
@@ -230,3 +305,7 @@ volumes:
   caddy_data:
   caddy_config:
   sftpgo_data:
+  mail_data:
+  mail_state:
+  mail_config:
+  roundcube_data:

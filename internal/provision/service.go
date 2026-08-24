@@ -39,6 +39,7 @@ type Service struct {
 	caddy  *caddyapi.Client
 	mysql  *MySQLManager
 	sftp   *SFTPManager
+	mail   *MailManager
 
 	// Serializa las recargas de Caddy: la Admin API acepta una config completa
 	// cada vez, así que dos escrituras concurrentes se pisarían.
@@ -46,14 +47,15 @@ type Service struct {
 }
 
 func New(cfg *config.Config, st *store.Store, dk *dockerx.Manager,
-	cd *caddyapi.Client, my *MySQLManager, sf *SFTPManager) *Service {
-	return &Service{cfg: cfg, st: st, docker: dk, caddy: cd, mysql: my, sftp: sf}
+	cd *caddyapi.Client, my *MySQLManager, sf *SFTPManager, ma *MailManager) *Service {
+	return &Service{cfg: cfg, st: st, docker: dk, caddy: cd, mysql: my, sftp: sf, mail: ma}
 }
 
 func (s *Service) Docker() *dockerx.Manager { return s.docker }
 func (s *Service) Store() *store.Store      { return s.st }
 func (s *Service) MySQL() *MySQLManager     { return s.mysql }
 func (s *Service) SFTP() *SFTPManager       { return s.sftp }
+func (s *Service) Mail() *MailManager       { return s.mail }
 
 // --- Errores de validación -------------------------------------------------
 
@@ -704,7 +706,7 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 	}
 
 	panelUpstream := "gocp-panel" + portOf(s.cfg.ListenAddr)
-	cfg, err := caddyapi.Build(routes, caddyapi.BuildOptions{
+	buildOpts := caddyapi.BuildOptions{
 		ACMEEmail:     s.cfg.CaddyEmail,
 		PanelHost:     PanelHost(s.cfg.PublicURL),
 		PanelUpstream: panelUpstream,
@@ -716,7 +718,12 @@ func (s *Service) SyncCaddy(ctx context.Context) error {
 		WAFEnabled:         settings.WAFEnabled,
 		CorazaDirectives:   s.cfg.CorazaDirectives,
 		RateLimitPerMinute: settings.RateLimitPerMinute,
-	})
+	}
+	if s.cfg.MailEnabled {
+		buildOpts.WebmailHost = WebmailHost(s.cfg.PublicURL)
+		buildOpts.WebmailUpstream = s.cfg.MailWebmailUpstream
+	}
+	cfg, err := caddyapi.Build(routes, buildOpts)
 	if err != nil {
 		return err
 	}
@@ -878,6 +885,12 @@ func PanelHost(publicURL string) string {
 		return h
 	}
 	return u
+}
+
+// WebmailHost es el subdominio donde se expone Roundcube (Caddy le da una
+// ruta fija, igual que ya hace con el propio panel — ver SyncCaddy).
+func WebmailHost(publicURL string) string {
+	return "webmail." + PanelHost(publicURL)
 }
 
 func portOf(listenAddr string) string {
