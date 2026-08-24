@@ -44,20 +44,29 @@
   --card-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 8px rgba(15, 23, 42, 0.05);
 }
 
-/* Sidebar: la única zona que se queda oscura. Redefine el mismo juego de
-   variables dentro de su ámbito; todo lo que ya está escrito contra los
-   tokens (var(--surface), var(--ink), var(--series-1)…) se adapta solo. */
+/* Sidebar: la única zona que se queda oscura — ahora sobre el azul de marca
+   en vez de un gris casi negro. Redefine el mismo juego de variables dentro
+   de su ámbito; todo lo que ya está escrito contra los tokens
+   (var(--surface), var(--ink), var(--series-1)…) se adapta solo. Blanco
+   sobre #2563eb da 5.2:1 (≥ AA); los tonos "muted"/"2" son el mismo blanco
+   con menor opacidad, nunca un gris aparte, para que seguir siendo legibles
+   sobre el azul. */
 .sidebar {
   color-scheme: dark;
-  --surface: #14161c;
-  --surface-2: #1b1e26;
-  --border: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.25);
-  --ink: #f3f4f6;
-  --ink-2: #b6bac3;
-  --ink-muted: #7c8290;
-  --series-1: #3f6ae0;
-  --link: #6f93ec;
+  --surface: #2563eb;
+  --surface-2: rgba(255, 255, 255, 0.14);
+  --border: rgba(255, 255, 255, 0.18);
+  --border-strong: rgba(255, 255, 255, 0.4);
+  --ink: #ffffff;
+  --ink-2: rgba(255, 255, 255, 0.85);
+  --ink-muted: rgba(255, 255, 255, 0.65);
+  --series-1: #ffffff;
+  --link: #ffffff;
+}
+
+.sidebar .brand-mark {
+  background: #ffffff;
+  color: #2563eb;
 }
 
 * {
@@ -131,10 +140,17 @@ a:hover {
 }
 
 .nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 10px;
   border-radius: 8px;
   color: var(--ink-2);
   font-weight: 500;
+}
+.nav a svg {
+  flex: none;
+  opacity: 0.85;
 }
 .nav a:hover {
   background: var(--surface-2);
@@ -144,6 +160,9 @@ a:hover {
   background: var(--surface-2);
   color: var(--ink);
   box-shadow: inset 2px 0 0 var(--series-1);
+}
+.nav a.active svg {
+  opacity: 1;
 }
 
 /* Separa visualmente los dos ambientes del panel (hosting del cliente vs
@@ -936,6 +955,137 @@ textarea:focus-visible {
   .skeleton {
     animation: none;
   }
+}
+
+/* --- Firewall / WAF: protecciones, presets y mini-gráfico --------------- */
+
+.protection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.protection-item {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.protection-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--tone, var(--series-1)) 12%, white);
+  color: var(--tone, var(--series-1));
+  flex: none;
+}
+
+.protection-item h3 {
+  margin: 0 0 3px;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.protection-item p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.preset-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.preset-item h3 {
+  margin: 0 0 2px;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.preset-item p {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+}
+
+.switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 38px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  padding: 0;
+  flex: none;
+}
+
+.switch .knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.switch.on {
+  background: var(--good);
+  border-color: var(--good);
+}
+
+.switch.on .knob {
+  transform: translateX(16px);
+}
+
+.switch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.bar-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 64px;
+  margin-top: 6px;
+}
+
+.bar-chart .bar {
+  flex: 1;
+  min-width: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--surface-2);
+}
+
+.bar-chart .bar.hot {
+  background: var(--tone, var(--series-1));
 }
 
 @media (max-width: 860px) {

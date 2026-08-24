@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { useAuth } from './auth'
 import { Spinner } from './components'
+import { Icon } from './icons'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Accounts from './pages/Accounts'
@@ -68,25 +69,25 @@ function Sidebar() {
       </div>
 
       <nav className="nav">
-        <NavLink to="/" end>Resumen</NavLink>
+        <NavLink to="/" end><Icon name="home" />Resumen</NavLink>
 
         {/* Ambiente "Panel de hosting": lo que ve un cliente. Cuenta y sitio
             son un solo ítem de menú (1 cuenta = 1 sitio principal); los
             sitios adicionales que permita el plan, y sus dominios, se crean
             y administran dentro de la propia cuenta, no como listado
             aparte. */}
-        {isClient && <NavLink to="/mi-cuenta">Mi hosting</NavLink>}
+        {isClient && <NavLink to="/mi-cuenta"><Icon name="server" />Mi hosting</NavLink>}
 
         {/* Ambiente "Administración del servidor": no existe para un
             cliente — es exclusivo de quien administra el servidor. */}
         {isReseller && (
           <>
             <div className="nav-section">Administración del servidor</div>
-            <NavLink to="/cuentas">Cuentas</NavLink>
-            <NavLink to="/usuarios">Usuarios</NavLink>
-            {isAdmin && <NavLink to="/planes">Planes</NavLink>}
-            {isAdmin && <NavLink to="/sistema">Sistema</NavLink>}
-            {isAdmin && <NavLink to="/configuraciones">Configuraciones</NavLink>}
+            <NavLink to="/cuentas"><Icon name="users" />Cuentas</NavLink>
+            <NavLink to="/usuarios"><Icon name="user" />Usuarios</NavLink>
+            {isAdmin && <NavLink to="/planes"><Icon name="tag" />Planes</NavLink>}
+            {isAdmin && <NavLink to="/sistema"><Icon name="shield" />Sistema</NavLink>}
+            {isAdmin && <NavLink to="/configuraciones"><Icon name="sliders" />Configuraciones</NavLink>}
           </>
         )}
       </nav>

@@ -6,7 +6,7 @@ import { Alert, Card, Empty, Spinner, Stat, formatDate, formatUptime } from '../
 import { Icon } from '../icons'
 import { errorMessage, useToast } from '../toast'
 
-type Tab = 'resumen' | 'auditoria' | 'seguridad'
+type Tab = 'resumen' | 'firewall' | 'waf' | 'auditoria'
 
 export default function System() {
   const [tab, setTab] = useState<Tab>('resumen')
@@ -65,8 +65,11 @@ export default function System() {
         <button className={tab === 'resumen' ? 'active' : ''} onClick={() => setTab('resumen')}>
           Resumen
         </button>
-        <button className={tab === 'seguridad' ? 'active' : ''} onClick={() => setTab('seguridad')}>
-          Seguridad
+        <button className={tab === 'firewall' ? 'active' : ''} onClick={() => setTab('firewall')}>
+          Firewall
+        </button>
+        <button className={tab === 'waf' ? 'active' : ''} onClick={() => setTab('waf')}>
+          WAF
         </button>
         <button className={tab === 'auditoria' ? 'active' : ''} onClick={() => setTab('auditoria')}>
           Auditoría
@@ -88,10 +91,12 @@ export default function System() {
         </div>
       )}
 
-      {tab === 'seguridad' && (
+      {tab === 'firewall' && <FirewallCard />}
+
+      {tab === 'waf' && (
         <>
           <SecurityCard />
-          <FirewallCard />
+          <ProtectionGrid />
           <WAFBlocksCard />
         </>
       )}
@@ -171,10 +176,10 @@ function SecurityCard() {
     retention !== security.backup_retention_days
   )
 
-  if (loading) return <Card title="Seguridad"><Spinner /></Card>
+  if (loading) return <Card title="Configuración del WAF"><Spinner /></Card>
 
   return (
-    <Card title="Seguridad">
+    <Card title="Configuración del WAF">
       {error && <Alert kind="error">{error}</Alert>}
       <p className="muted" style={{ marginTop: 0 }}>
         Se aplica en caliente contra Caddy al guardar. Si el WAF no arranca (por ejemplo, porque el
@@ -221,6 +226,66 @@ function SecurityCard() {
   )
 }
 
+// Grilla informativa de lo que cubre el WAF cuando está activo. No son
+// interruptores independientes: la API solo expone un único `waf_enabled`
+// (motor Coraza + reglas OWASP CRS), así que las cuatro fichas comparten ese
+// mismo estado en vez de simular controles que el backend no tiene.
+function ProtectionGrid() {
+  const [security, setSecurity] = useState<SecurityStatus | null>(null)
+
+  useEffect(() => {
+    api.get<SecurityStatus>('/system/security').then(setSecurity).catch(() => setSecurity(null))
+  }, [])
+
+  const on = !!security?.waf_enabled
+
+  const items: { icon: Parameters<typeof Icon>[0]['name']; title: string; desc: string; active: boolean }[] = [
+    {
+      icon: 'shield', title: 'Motor Coraza (ModSecurity)',
+      desc: 'Motor central de reglas, compatible con OWASP CRS.', active: on,
+    },
+    {
+      icon: 'lock', title: 'Escaneo SQLi & XSS',
+      desc: 'Conjunto de reglas OWASP CRS: previene inyecciones y scripts maliciosos.', active: on,
+    },
+    {
+      icon: 'activity', title: 'Límite de peticiones',
+      desc: security ? `${security.rate_limit_per_minute} peticiones por IP y por minuto.` : '—', active: on,
+    },
+    {
+      icon: 'check-circle', title: 'Contenedores sin privilegios',
+      desc: 'Cada sitio corre con un usuario sin privilegios de root.',
+      active: !!security?.site_non_root,
+    },
+  ]
+
+  return (
+    <Card title="Protecciones activas">
+      <div className="protection-grid">
+        {items.map((it) => (
+          <div className="protection-item" key={it.title}>
+            <span
+              className="protection-icon"
+              style={{ '--tone': it.active ? 'var(--good)' : 'var(--ink-muted)' } as React.CSSProperties}
+            >
+              <Icon name={it.icon} size={17} />
+            </span>
+            <div>
+              <h3>
+                {it.title}
+                <span className={`badge ${it.active ? 'ok' : 'idle'}`} style={{ fontSize: 11 }}>
+                  <span className="dot" />{it.active ? 'Activo' : 'Inactivo'}
+                </span>
+              </h3>
+              <p>{it.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  )
+}
+
 function FirewallCard() {
   const toast = useToast()
   const [status, setStatus] = useState<FirewallStatus | null>(null)
@@ -229,6 +294,7 @@ function FirewallCard() {
   const [port, setPort] = useState('')
   const [proto, setProto] = useState<'tcp' | 'udp'>('tcp')
   const [busy, setBusy] = useState(false)
+  const [presetBusy, setPresetBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
@@ -278,11 +344,85 @@ function FirewallCard() {
     )
   }
 
+  const presets: { key: string; label: string; desc: string; ports: { port: number; proto: 'tcp' | 'udp' }[] }[] = [
+    {
+      key: 'web', label: 'Servidor Web (HTTP/HTTPS)', desc: 'TCP puertos 80, 443',
+      ports: [{ port: 80, proto: 'tcp' }, { port: 443, proto: 'tcp' }],
+    },
+    {
+      key: 'ssh', label: 'Acceso SSH', desc: `TCP puerto ${status.protected_port ?? 22}`,
+      ports: [{ port: status.protected_port ?? 22, proto: 'tcp' }],
+    },
+    {
+      key: 'ftp', label: 'Servidor FTP', desc: 'TCP puertos 20, 21',
+      ports: [{ port: 20, proto: 'tcp' }, { port: 21, proto: 'tcp' }],
+    },
+    {
+      key: 'mail', label: 'Correo (SMTP/IMAP/POP3)', desc: 'Múltiples puertos',
+      ports: [
+        { port: 25, proto: 'tcp' }, { port: 465, proto: 'tcp' }, { port: 587, proto: 'tcp' },
+        { port: 993, proto: 'tcp' }, { port: 995, proto: 'tcp' },
+      ],
+    },
+  ]
+
+  function isPresetActive(preset: typeof presets[number]) {
+    return preset.ports.every((p) =>
+      status!.rules?.some((r) => r.port === p.port && r.proto === p.proto && r.action === 'allow'))
+  }
+
+  async function togglePreset(preset: typeof presets[number]) {
+    const active = isPresetActive(preset)
+    setError('')
+    setPresetBusy(preset.key)
+    try {
+      let s = status!
+      for (const p of preset.ports) {
+        s = await api.post<FirewallStatus>('/system/security/firewall/rules', {
+          action: active ? 'deny' : 'allow', port: p.port, proto: p.proto,
+        })
+      }
+      setStatus(s)
+      toast.success(active ? `${preset.label}: cerrado` : `${preset.label}: abierto`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo aplicar el cambio')
+    } finally {
+      setPresetBusy(null)
+    }
+  }
+
   return (
     <Card title="Firewall">
       {error && <Alert kind="error">{error}</Alert>}
       {status.error && <Alert kind="error">No se pudo leer el estado: {status.error}</Alert>}
 
+      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Reglas predefinidas</h3>
+      <div className="preset-grid" style={{ marginBottom: 20 }}>
+        {presets.map((preset) => {
+          const active = isPresetActive(preset)
+          return (
+            <div className="preset-item" key={preset.key}>
+              <div>
+                <h3>{preset.label}</h3>
+                <p>{preset.desc}</p>
+              </div>
+              <button
+                type="button"
+                className={`switch ${active ? 'on' : ''}`}
+                role="switch"
+                aria-checked={active}
+                aria-label={preset.label}
+                disabled={presetBusy !== null}
+                onClick={() => void togglePreset(preset)}
+              >
+                <span className="knob" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '0 0 10px' }}>Reglas actuales</h3>
       {(status.rules ?? []).length === 0 ? (
         <Empty text="No hay reglas activas." />
       ) : (
@@ -312,7 +452,8 @@ function FirewallCard() {
         </table>
       )}
 
-      <form onSubmit={submit} style={{ display: 'flex', gap: 10, alignItems: 'flex-end', marginTop: 18 }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, margin: '20px 0 10px' }}>Añadir regla</h3>
+      <form onSubmit={submit} style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
         <div className="field" style={{ maxWidth: 140 }}>
           <label htmlFor="fw-port">Puerto</label>
           <input id="fw-port" type="number" min={1} max={65535} value={port} required
@@ -380,45 +521,103 @@ function WAFBlocksCard() {
     setBlocks((prev) => [...res.blocks, ...prev])
   }
 
+  const [ipFilter, setIpFilter] = useState('')
+  const filtered = ipFilter
+    ? blocks.filter((b) => b.client_ip.toLowerCase().includes(ipFilter.trim().toLowerCase()))
+    : blocks
+
+  const now = Date.now()
+  const last24h = blocks.filter((b) => now - new Date(b.occurred_at).getTime() <= 24 * 3600 * 1000)
+  // 24 cubetas de 1 hora, calculadas solo sobre lo cargado en memoria (no es
+  // un total exacto del día si hay más de 50 bloqueos sin cargar), por eso
+  // el hint aclara "en lo cargado" en vez de prometer un total del día.
+  const buckets = Array.from({ length: 24 }, (_, i) => {
+    const from = now - (24 - i) * 3600 * 1000
+    const to = from + 3600 * 1000
+    return blocks.filter((b) => {
+      const t = new Date(b.occurred_at).getTime()
+      return t >= from && t < to
+    }).length
+  })
+  const maxBucket = Math.max(...buckets, 1)
+
   return (
-    <Card
-      title="Registro de bloqueos del WAF"
-      actions={
-        <button className={`sm ${live ? 'primary' : ''}`} onClick={() => setLive((v) => !v)}>
-          <Icon name="activity" size={14} />
-          {live ? 'Detener seguimiento' : 'Seguir en vivo'}
-          {live && <span className="live-dot" aria-hidden="true" />}
-        </button>
-      }
-    >
-      {loading ? (
-        <Spinner />
-      ) : blocks.length === 0 ? (
-        <Empty text="Todavía no se registró ningún bloqueo." />
-      ) : (
-        <>
-          <table>
-            <thead>
-              <tr><th>Hora</th><th>IP</th><th>Dominio</th><th>URI</th></tr>
-            </thead>
-            <tbody>
-              {[...blocks].reverse().map((b) => (
-                <tr key={b.id}>
-                  <td className="muted">{formatDate(b.occurred_at)}</td>
-                  <td className="strong">{b.client_ip || '—'}</td>
-                  <td>{b.hostname || '—'}</td>
-                  <td className="muted" style={{ maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {b.uri || '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="actions" style={{ marginTop: 10 }}>
-            <button className="sm ghost" onClick={() => void loadMore()}>Cargar más</button>
+    <>
+      <Card title="Actividad del WAF">
+        <div className="stat-grid" style={{ marginBottom: 0, gridTemplateColumns: '160px 1fr' }}>
+          <div className="stat" style={{ boxShadow: 'none' }}>
+            <span className="stat-icon tone-rose"><Icon name="alert-triangle" size={17} /></span>
+            <div className="value">{last24h.length}</div>
+            <div className="label">Bloqueos (24 h)</div>
+            <div className="hint">en lo cargado abajo</div>
           </div>
-        </>
-      )}
-    </Card>
+          <div className="stat" style={{ boxShadow: 'none' }}>
+            <div className="label">Bloqueos por hora (últimas 24 h)</div>
+            <div className="bar-chart" style={{ '--tone': 'var(--serious)' } as React.CSSProperties}>
+              {buckets.map((v, i) => (
+                <span
+                  key={i}
+                  className={`bar ${v > 0 ? 'hot' : ''}`}
+                  style={{ height: `${Math.max(4, (v / maxBucket) * 100)}%` }}
+                  title={`${v} bloqueo(s)`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card
+        title="Registro de bloqueos del WAF"
+        actions={
+          <button className={`sm ${live ? 'primary' : ''}`} onClick={() => setLive((v) => !v)}>
+            <Icon name="activity" size={14} />
+            {live ? 'Detener seguimiento' : 'Seguir en vivo'}
+            {live && <span className="live-dot" aria-hidden="true" />}
+          </button>
+        }
+      >
+        {loading ? (
+          <Spinner />
+        ) : blocks.length === 0 ? (
+          <Empty text="Todavía no se registró ningún bloqueo." />
+        ) : (
+          <>
+            <div className="field table-search">
+              <input
+                value={ipFilter}
+                onChange={(e) => setIpFilter(e.target.value)}
+                placeholder="Buscar por IP…"
+                aria-label="Buscar por IP"
+              />
+            </div>
+            {filtered.length === 0 ? (
+              <Empty text="Ninguna IP cargada coincide con la búsqueda." />
+            ) : (
+              <table>
+                <thead>
+                  <tr><th>Hora</th><th>IP</th><th>Dominio</th><th>URI</th></tr>
+                </thead>
+                <tbody>
+                  {[...filtered].reverse().map((b) => (
+                    <tr key={b.id}>
+                      <td className="muted">{formatDate(b.occurred_at)}</td>
+                      <td className="strong">{b.client_ip || '—'}</td>
+                      <td>{b.hostname || '—'}</td>
+                      <td className="muted" style={{ maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {b.uri || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <div className="actions" style={{ marginTop: 10 }}>
+              <button className="sm ghost" onClick={() => void loadMore()}>Cargar más</button>
+            </div>
+          </>
+        )}
+      </Card>
+    </>
   )
 }
